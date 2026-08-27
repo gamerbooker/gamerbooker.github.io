@@ -1,7 +1,8 @@
-import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.0";
-import { canUseStudioVoice, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.0";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.0";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.0";
+import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.1";
+import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.1";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.1";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.1";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.1";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
@@ -371,9 +372,6 @@ function installDurationGuard(workerSource) {
 
 async function boot() {
   const startupLanguage = resolveStartupVoiceLanguage(self.location.search);
-  if (QUALITY.id === "studio" && !canUseStudioVoice(navigator.deviceMemory, navigator.hardwareConcurrency)) {
-    throw new Error("O modo Estúdio precisa de um navegador que informe ao menos 8 GB de memória e 8 núcleos. Use o modo Essencial neste aparelho.");
-  }
   const [workerSource, sentencePieceSource] = await Promise.all([
     fetchPinnedSource("inference-worker.js", WORKER_SHA256),
     fetchPinnedSource("sentencepiece.js?v=3", SENTENCEPIECE_SHA256),
@@ -411,6 +409,7 @@ async function boot() {
   }
 
   let source = installDurationGuard(workerSource);
+  source = installReferenceRuntime(source);
   if (QUALITY.id === "studio") source = installStudioVoiceRuntime(source);
   source = source
     .replace(
@@ -460,7 +459,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.5.0" });
+  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.5.1" });
 }
 
 try {

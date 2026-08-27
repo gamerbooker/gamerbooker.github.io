@@ -6,14 +6,15 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.0";
+} from "./text-pipeline.js?v=6.5.1";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.1";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
 const MAX_PENDING_SYNTHESIS = 8;
 const MAX_TIMED_SEGMENTS = 200;
 const REFERENCE_WAIT_MS = 15_000;
-const PREPARATION_TIMEOUT_MS = 120_000;
+const PREPARATION_TIMEOUT_MS = VOICE_TIMEOUTS.preparationIdleMs;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MIN_SAFE_CHUNK_SECONDS = 4.8;
 const MAX_SAFE_CHUNK_SECONDS = 40;
@@ -148,20 +149,32 @@ function prepareTimedSegments(value, language, fullText) {
 
 function waitWithTimeout(register, milliseconds, message) {
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
+    let timeout = null;
+    let cleanup = null;
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== null) window.clearTimeout(timeout);
       cleanup?.();
-      reject(new Error(message));
-    }, milliseconds);
-    const cleanup = register(
-      (value) => {
-        window.clearTimeout(timeout);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timeout);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
+      callback(value);
+    };
+    const touch = () => {
+      if (settled) return;
+      if (timeout !== null) window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => finish(reject, new Error(message)), milliseconds);
+    };
+    touch();
+    try {
+      cleanup = register(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error instanceof Error ? error : new Error(String(error))),
+        touch,
+      );
+      if (settled) cleanup?.();
+    } catch (error) {
+      finish(reject, error);
+    }
   });
 }
 
@@ -193,9 +206,10 @@ export function installLocalVoiceBridge(app) {
   let taskRunning = false;
   let referenceWaitTimer = null;
   let ignoreOrphanedStreamEnd = false;
+  let disposed = false;
 
   const postToParent = (message, transfer = []) => {
-    if (document.body.dataset.consentGate !== "confirmed") return;
+    if (disposed || document.body.dataset.consentGate !== "confirmed") return;
     const payload = { protocolVersion: PROTOCOL_VERSION, ...message };
     const transferable = [...new Set(transfer)].filter((buffer) => (
       buffer instanceof ArrayBuffer && buffer.byteLength > 0
@@ -248,6 +262,18 @@ export function installLocalVoiceBridge(app) {
     workerObserved.addEventListener("message", (event) => {
       const message = event.data;
       if (!message || typeof message !== "object") return;
+      if (message.type === "audioria_reference_progress") {
+        const waiter = Array.from(voiceWaiters).find((item) => item.requestId === message.requestId);
+        if (!waiter) return;
+        // Renew only on real worker activity, never on an artificial timer.
+        waiter.touch();
+        const conditioning = message.phase === "reference-conditioning";
+        const ratio = Number.isFinite(message.current) && Number.isFinite(message.total) && message.total > 0
+          ? Math.min(1, Math.max(0, message.current / message.total)) : 0;
+        const progress = conditioning ? VOICE_PROGRESS.referenceConditioning
+          : VOICE_PROGRESS.referenceEncoding + ratio * (VOICE_PROGRESS.referenceConditioning - VOICE_PROGRESS.referenceEncoding);
+        postProgress(waiter.requestId, progress, message.phase, { current: message.current, total: message.total });
+      }
       if (message.type === "bundle_loaded" && typeof message.language === "string") {
         const waiter = languageWaiters.get(message.language);
         if (waiter) {
@@ -277,7 +303,7 @@ export function installLocalVoiceBridge(app) {
 
   const signalEngineReady = () => {
     observeWorker();
-    if (!app.isWorkerReady || engineReady) return;
+    if (disposed || !app.isWorkerReady || engineReady) return;
     engineReady = true;
     postToParent({
       type: "audioria:voice-engine-ready",
@@ -294,11 +320,12 @@ export function installLocalVoiceBridge(app) {
     return result;
   };
 
-  app.handleVoiceEncoded = function audioriaHandleVoiceEncoded(voiceName) {
+  app.handleVoiceEncoded = function audioriaHandleVoiceEncoded(voiceName, requestId) {
+    const matching = Array.from(voiceWaiters).filter((waiter) => waiter.requestId === requestId);
+    if (disposed || !matching.length || voiceName !== "custom") return;
     const result = originalHandleVoiceEncoded(voiceName);
     if (voiceName === "custom") customVoiceReady = true;
-    for (const waiter of voiceWaiters) waiter.resolve(voiceName);
-    voiceWaiters.clear();
+    for (const waiter of matching) waiter.resolve(voiceName);
     return result;
   };
 
@@ -343,7 +370,7 @@ export function installLocalVoiceBridge(app) {
   };
 
   const encodeReference = async (task) => {
-    postProgress(task.requestId, 8, "model");
+    postProgress(task.requestId, VOICE_PROGRESS.modelReady, "model");
     const resolved = await ensureLanguage(task.language);
     const file = task.file;
     postToParent({
@@ -352,7 +379,7 @@ export function installLocalVoiceBridge(app) {
       status: "decoding",
       language: resolved.locale,
     });
-    postProgress(task.requestId, 18, "reference-decoding");
+    postProgress(task.requestId, VOICE_PROGRESS.referenceDecoding, "reference-decoding");
     app.startVoicePreparation("Preparando amostra autorizada...");
     if (app.elements.voiceUploadStatus) {
       app.elements.voiceUploadStatus.textContent = "Processando amostra autorizada...";
@@ -379,18 +406,19 @@ export function installLocalVoiceBridge(app) {
       status: "encoding",
       language: resolved.locale,
     });
-    postProgress(task.requestId, 32, "reference-encoding");
-    const encoded = waitWithTimeout((resolve, reject) => {
-      const waiter = { resolve, reject };
+    postProgress(task.requestId, VOICE_PROGRESS.referenceEncoding, "reference-encoding");
+    if (disposed) throw new Error("Preparação cancelada.");
+    const encoded = waitWithTimeout((resolve, reject, touch) => {
+      const waiter = { resolve, reject, touch, requestId: task.requestId };
       voiceWaiters.add(waiter);
       return () => voiceWaiters.delete(waiter);
-    }, PREPARATION_TIMEOUT_MS, "Tempo excedido ao codificar a voz autorizada.");
+    }, PREPARATION_TIMEOUT_MS, "A preparação ficou 15 minutos sem responder. Tente o modelo Essencial ou uma referência mais curta.");
     observeWorker();
-    app.worker.postMessage({ type: "encode_voice", data: { audio: audioData } }, [audioData.buffer]);
+    app.worker.postMessage({ type: "encode_voice", requestId: task.requestId, data: { audio: audioData } }, [audioData.buffer]);
     await encoded;
     if (app.elements.voiceSelect) app.elements.voiceSelect.value = "custom";
     app.currentVoice = "custom";
-    postProgress(task.requestId, 52, "reference-ready");
+    postProgress(task.requestId, VOICE_PROGRESS.referenceReady, "reference-ready");
     postToParent({
       type: "audioria:voice-ready",
       requestId: task.requestId,
@@ -446,7 +474,7 @@ export function installLocalVoiceBridge(app) {
     }
 
     const wavBlob = app.float32ToWavBlob(combined, app.currentSampleRate);
-    postProgress(batch.requestId, 99, "mastering");
+    postProgress(batch.requestId, VOICE_PROGRESS.mastering, "mastering");
     if (app.lastCompletedAudioUrl) URL.revokeObjectURL(app.lastCompletedAudioUrl);
     app.lastCompletedAudioUrl = URL.createObjectURL(wavBlob);
     app.lastCompletedAudioFilename = app.buildAudioFilename();
@@ -463,7 +491,7 @@ export function installLocalVoiceBridge(app) {
     activeBatch = null;
 
     if (batch.source === "bridge") {
-      postProgress(batch.requestId, 100, "complete");
+      postProgress(batch.requestId, VOICE_PROGRESS.complete, "complete");
       postToParent({
         type: "audioria:voice-audio",
         requestId: batch.requestId,
@@ -554,7 +582,7 @@ export function installLocalVoiceBridge(app) {
     const completedChunks = batch.nextIndex;
     postProgress(
       batch.requestId,
-      60 + completedChunks / Math.max(1, batch.chunks.length) * 36,
+      VOICE_PROGRESS.synthesisStart + completedChunks / Math.max(1, batch.chunks.length) * (VOICE_PROGRESS.synthesisEnd - VOICE_PROGRESS.synthesisStart),
       "synthesis",
       { current: completedChunks + 1, total: batch.chunks.length },
     );
@@ -580,6 +608,10 @@ export function installLocalVoiceBridge(app) {
   app.bufferOrPlay = function audioriaBufferOrPlay(audioData) {
     if (activeBatch) {
       app.currentGenerationChunks.push(new Float32Array(audioData));
+      activeBatch.audioSamples = (activeBatch.audioSamples ?? 0) + audioData.length;
+      postProgress(activeBatch.requestId, VOICE_PROGRESS.synthesisStart, "synthesis-stream", {
+        audioSeconds: activeBatch.audioSamples / app.currentSampleRate,
+      });
       return;
     }
     originalBufferOrPlay(audioData);
@@ -623,7 +655,7 @@ export function installLocalVoiceBridge(app) {
     });
     postProgress(
       batch.requestId,
-      60 + batch.nextIndex / Math.max(1, batch.chunks.length) * 36,
+      VOICE_PROGRESS.synthesisStart + batch.nextIndex / Math.max(1, batch.chunks.length) * (VOICE_PROGRESS.synthesisEnd - VOICE_PROGRESS.synthesisStart),
       "synthesis",
       { current: batch.nextIndex, total: batch.chunks.length },
     );
@@ -673,7 +705,7 @@ export function installLocalVoiceBridge(app) {
     if (task.voiceMode === "clone" && !customVoiceReady) throw new Error("Envie e aguarde uma amostra de voz autorizada antes da síntese.");
     const voice = task.voiceMode === "catalog" ? resolveCatalogVoice() : "custom";
     const plan = task.timedPlan ?? splitVoiceText(task.text, { language: language.engineLanguage });
-    postProgress(task.requestId, 56, "text-ready", { total: plan.chunks.length });
+    postProgress(task.requestId, VOICE_PROGRESS.textReady, "text-ready", { total: plan.chunks.length });
     activeBatch = {
       source: "bridge",
       requestId: task.requestId,
@@ -692,7 +724,7 @@ export function installLocalVoiceBridge(app) {
   };
 
   async function pumpQueue() {
-    if (document.body.dataset.consentGate !== "confirmed") return;
+    if (disposed || document.body.dataset.consentGate !== "confirmed") return;
     if (taskRunning || activeBatch || !engineReady || !queue.length) return;
     let index = 0;
     if (!customVoiceReady && queue[0].kind === "synthesis" && queue[0].voiceMode === "clone") {
@@ -745,11 +777,38 @@ export function installLocalVoiceBridge(app) {
     }
   }
 
+  const stopBridgeWork = () => {
+    if (disposed) return;
+    disposed = true;
+    engineReady = false;
+    customVoiceReady = false;
+    queue.splice(0);
+    inFlightRequestIds.clear();
+    progressByRequest.clear();
+    if (referenceWaitTimer) window.clearTimeout(referenceWaitTimer);
+    referenceWaitTimer = null;
+    const cancelled = new Error("Operação cancelada.");
+    for (const waiter of voiceWaiters) waiter.reject(cancelled);
+    for (const waiter of languageWaiters.values()) waiter.reject(cancelled);
+    voiceWaiters.clear();
+    languageWaiters.clear();
+    activeBatch = null;
+    app.isGenerating = false;
+    app.isWorkerReady = false;
+    app.worker?.terminate?.();
+    window.removeEventListener("message", receiveParentMessage);
+  };
+
   const receiveParentMessage = (event) => {
     if (event.origin !== targetOrigin || event.source !== parentWindow) return;
-    if (document.body.dataset.consentGate !== "confirmed") return;
+    if (disposed || document.body.dataset.consentGate !== "confirmed") return;
     const message = event.data;
     if (!message || typeof message !== "object") return;
+
+    if (message.type === "audioria:voice-cancel") {
+      stopBridgeWork();
+      return;
+    }
 
     if (message.type === "audioria:voice-consent") {
       if (message.confirmed === true) return;
@@ -763,7 +822,7 @@ export function installLocalVoiceBridge(app) {
       referenceWaitTimer = null;
       if (app.isGenerating) app.worker?.postMessage({ type: "stop" });
       if (activeBatch) abortActiveBatch("consent_revoked", new Error("A autorização da voz foi removida."));
-      window.removeEventListener("message", receiveParentMessage);
+      stopBridgeWork();
       return;
     }
 
@@ -835,7 +894,7 @@ export function installLocalVoiceBridge(app) {
   const bridge = Object.freeze({
     protocolVersion: PROTOCOL_VERSION,
     dispose() {
-      window.removeEventListener("message", receiveParentMessage);
+      stopBridgeWork();
     },
   });
   Object.defineProperty(app, "__audioriaBridgeInstalled", {

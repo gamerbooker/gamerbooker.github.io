@@ -6,11 +6,11 @@ export const POCKET_STUDIO_VOICES_REVISION = "e81d79e8194ad4c7ce879c87a4258ef20c
 export const VOICE_QUALITY_PROFILES = Object.freeze({
   standard: Object.freeze({
     id: "standard", layers: 6, downloadBytes: 190 * 1024 * 1024,
-    minimumDeviceMemoryGb: 0, minimumThreads: 0,
+    recommendedDeviceMemoryGb: 0, recommendedThreads: 0,
   }),
   studio: Object.freeze({
     id: "studio", layers: 24, downloadBytes: 466_755_162,
-    minimumDeviceMemoryGb: 8, minimumThreads: 8,
+    recommendedDeviceMemoryGb: 8, recommendedThreads: 8,
   }),
 });
 
@@ -30,7 +30,8 @@ export function resolveVoiceQuality(value, language = "pt-BR") {
     ? VOICE_QUALITY_PROFILES.studio : VOICE_QUALITY_PROFILES.standard;
 }
 
-export function canUseStudioVoice(deviceMemoryGb, threads) {
+// Advice only. Unknown or low hardware must never disable a model.
+export function isStudioVoiceRecommended(deviceMemoryGb, threads) {
   return Number.isFinite(deviceMemoryGb) && deviceMemoryGb >= 8
     && Number.isFinite(threads) && threads >= 8;
 }

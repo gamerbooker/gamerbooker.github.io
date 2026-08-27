@@ -207,6 +207,7 @@ export function normalizeVoiceText(input, language = "portuguese") {
       : { at: " arroba ", code: " código omitido ", dot: " ponto ", link: " link " };
   let value = withoutUnsafeCodePoints(decodeSpeechEntities(input).normalize("NFKC"))
     .replace(/\r\n?/gu, "\n")
+    .replace(/[\u2028\u2029]/gu, "\n")
     .replace(BIDI_OR_ZERO_WIDTH, "")
     .replace(TYPOGRAPHIC_QUOTES, '"')
     .replace(TYPOGRAPHIC_APOSTROPHES, "'")
