@@ -1,4 +1,4 @@
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js";
+import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.3.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
@@ -204,8 +204,10 @@ function installDurationGuard(workerSource) {
   let source = replaceExactlyOnce(
     workerSource,
     "        const chunkText = chunks[chunkIdx];",
-    `        const chunkText = chunks[chunkIdx];
-        const audioriaCodePoints = Array.from(chunkText).length;
+    `        const audioriaPreparedChunk = prepareTextPrompt(chunks[chunkIdx]);
+        const chunkText = audioriaPreparedChunk.text;
+        const audioriaFramesAfterEos = Math.max(framesAfterEos, audioriaPreparedChunk.framesAfterEos);
+        const audioriaCodePoints = Array.from(chunkText.trim()).length;
         const audioriaWordCount = chunkText.trim().split(/\\s+/u).filter(Boolean).length;
         const audioriaMaxFrames = Math.min(
             MAX_FRAMES,
@@ -226,6 +228,15 @@ function installDurationGuard(workerSource) {
     "            const isEos = eosLogit > -4.0;",
     "            const isEos = eosLogit > -4.0 && step >= audioriaMinimumFrames;",
     "do piso anti-EOS precoce",
+  );
+  // Match the current native Pocket pipeline: prepare EACH internal sentence.
+  // Splitting trims short-input padding, and the final sentence can be much
+  // shorter than the outer request. Its decoder tail must follow its own text.
+  source = replaceExactlyOnce(
+    source,
+    "            const shouldStop = eosStep != null && step >= eosStep + framesAfterEos;",
+    "            const shouldStop = eosStep != null && step >= eosStep + audioriaFramesAfterEos;",
+    "da preparação e cauda por frase",
   );
   source = replaceExactlyOnce(
     source,
@@ -272,6 +283,14 @@ function installDurationGuard(workerSource) {
         ? "rafael"
         : bundleMetadata.predefined_voices?.includes("alba") ? "alba" : null;`,
     "da voz nativa padrão em português",
+  );
+  // Pocket v3 recommends 0.3 for English; Portuguese keeps its native 0.7.
+  // Do not silently transfer English tuning to a different-language checkpoint.
+  source = replaceExactlyOnce(
+    source,
+    "            const temperature = 0.7;",
+    '            const temperature = currentLanguage.startsWith("english") ? 0.3 : 0.7;',
+    "da temperatura específica por idioma",
   );
   return source;
 }
@@ -320,7 +339,7 @@ async function boot() {
   }
   source = source.replaceAll(
     runtimeErrorPost,
-    'postMessage({ type: "error", error: "AUDIORIA_RUNTIME_620: " + (err?.stack || err?.toString() || "unknown error") });',
+    'postMessage({ type: "error", error: "AUDIORIA_RUNTIME_630: " + (err?.stack || err?.toString() || "unknown error") });',
   );
 
   const moduleUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
@@ -336,7 +355,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.2.0" });
+  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.3.0" });
 }
 
 try {
@@ -345,6 +364,6 @@ try {
   self.removeEventListener("message", capturePendingMessage);
   self.postMessage({
     type: "error",
-    error: `AUDIORIA_BOOT_620: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
+    error: `AUDIORIA_BOOT_630: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
   });
 }

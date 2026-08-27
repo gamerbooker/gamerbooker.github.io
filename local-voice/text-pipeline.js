@@ -65,12 +65,12 @@ const TRIM_TRAILING_PADDING_MILLISECONDS = 96;
 // A short digital pre-roll protects the first phoneme when browsers/players
 // open a freshly encoded stream and also gives speech recognizers a stable
 // noise floor before speech begins.
-const INITIAL_HEAD_MILLISECONDS = 160;
-const TERMINAL_TAIL_MILLISECONDS = 160;
+const INITIAL_HEAD_MILLISECONDS = 220;
+const TERMINAL_TAIL_MILLISECONDS = 240;
 const REFERENCE_SILENCE_THRESHOLD_DBFS = -62;
 const REFERENCE_EDGE_PADDING_MILLISECONDS = 120;
 const REFERENCE_MINIMUM_SECONDS = 1;
-const REFERENCE_MAXIMUM_SECONDS = 10;
+const REFERENCE_MAXIMUM_SECONDS = 30;
 const MASTERING_HIGH_PASS_HZ = 48;
 const MASTERING_PEAK_CEILING = 0.965;
 const MASTERING_MAXIMUM_GAIN_DB = 2.5;
@@ -417,7 +417,7 @@ export function trimFloat32Silence(audio, sampleRate, {
 /**
  * Selects the useful, authorized portion of a clone reference without
  * mastering or denoising it. Removing only sub -62 dBFS outer silence before
- * the ten-second cap prevents a recorder's idle lead-in from replacing useful
+ * the thirty-second cap prevents a recorder's idle lead-in from replacing useful
  * speech while the 120 ms guards retain breath and unvoiced consonants.
  */
 export function prepareVoiceReferencePcm(audio, sampleRate, {
@@ -584,10 +584,18 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
     const metadata = chunk instanceof Float32Array
       ? describeVoiceChunk("trecho", { index: originalIndex })
       : chunk.metadata ?? describeVoiceChunk("trecho", { index: originalIndex });
-    const trimmed = trimFloat32Silence(audio, sampleRate, { thresholdDbfs });
+    // A quiet /s/, /f/ or breath can precede the first voiced sample by more
+    // than any fixed gate margin. Never gate a short generated utterance:
+    // preserve its whole waveform, sanitizing non-finite values in mastering.
+    // The gate remains useful for long chunks with excessive idle padding.
+    const shortUtterance = audio.length <= sampleRate * 8;
+    const hasSignal = audio.some((sample) => Number.isFinite(sample) && sample !== 0);
+    const trimmed = shortUtterance
+      ? (hasSignal ? audio : new Float32Array(0))
+      : trimFloat32Silence(audio, sampleRate, { thresholdDbfs });
     return trimmed.length ? [{
       audio: masterVoicePcm(trimmed, sampleRate),
-      inactiveEdges: measureInactiveEdges(trimmed, fadeThreshold),
+      inactiveEdges: measureInactiveEdges(trimmed, shortUtterance ? 0 : fadeThreshold),
       metadata,
     }] : [];
   });
