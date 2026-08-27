@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Audioria Local Voice</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./gate.js?v=6.2.0"></script>
+  </head>
+  <body>
+    <main class="engine-shell">
+      <header class="engine-header">
+        <div>
+          <span class="engine-kicker">AUDIORIA / LOCAL VOICE</span>
+          <h1>Clone e gere no seu aparelho.</h1>
+        </div>
+        <span class="privacy-badge">● zero upload</span>
+      </header>
+
+      <section class="voice-section" aria-label="Configuração da voz">
+        <label class="voice-selector">
+          <span class="voice-selector__label">Idioma</span>
+          <select id="language-select" class="voice-selector__dropdown">
+            <option value="portuguese" selected>Português</option>
+            <option value="english_2026-04">English</option>
+            <option value="spanish">Español</option>
+            <option value="italian">Italiano</option>
+            <option value="german">Deutsch</option>
+          </select>
+        </label>
+        <label class="voice-selector">
+          <span class="voice-selector__label">Voz</span>
+          <select id="voice-select" class="voice-selector__dropdown">
+            <option value="">Carregando…</option>
+          </select>
+        </label>
+        <div class="voice-upload">
+          <button id="voice-upload-btn" class="btn btn--outline btn--small" type="button">
+            <span>↑</span> Usar minha amostra
+          </button>
+          <input type="file" id="voice-upload" accept="audio/*" hidden />
+          <span id="voice-upload-status" class="voice-upload-status"></span>
+        </div>
+      </section>
+
+      <section class="input-section">
+        <div class="textarea-wrap">
+          <textarea id="text-input" maxlength="10000" placeholder="Cole aqui o texto traduzido…" aria-label="Texto para sintetizar"></textarea>
+          <div class="textarea-meta"><span><span id="char-count">0</span> caracteres</span></div>
+        </div>
+        <div class="sample-texts" aria-label="Textos de exemplo">
+          <span class="sample-texts__label">Testar:</span>
+          <button class="sample-btn" type="button" data-text="Olá e bem-vindo à Audioria. Minha voz agora pode atravessar fronteiras.">Boas-vindas</button>
+          <button class="sample-btn" type="button" data-text="Vou explicar passo a passo, começando pela parte mais importante.">Guia</button>
+          <button class="sample-btn" type="button" data-text="Uau, parabéns. Essa é uma notícia realmente fantástica.">Animado</button>
+          <button class="sample-btn" type="button" data-text="Sinto muito que você esteja passando por isso.">Empático</button>
+          <button class="sample-btn" type="button" data-text="Vou cuidar disso agora e manter você atualizado.">Direto</button>
+        </div>
+        <div class="controls">
+          <button id="generate-btn" class="btn btn--primary" type="button">
+            <span class="btn__text">Gerar áudio local</span><span class="btn__loader" id="btn-loader"></span>
+          </button>
+          <button id="stop-btn" class="btn btn--secondary" type="button" disabled>Parar</button>
+        </div>
+      </section>
+
+      <section class="output-section">
+        <div class="visualizer-panel">
+          <div class="visualizer-panel__header">
+            <span class="visualizer-panel__title">Saída local</span>
+            <div class="status-indicator" id="status-indicator">
+              <span class="status-dot"></span><span class="status-text" id="stat-status">Iniciando…</span>
+              <button id="download-audio-btn" class="btn btn--outline btn--small visualizer-panel__download" type="button" disabled>↓ Baixar WAV</button>
+            </div>
+          </div>
+          <div class="visualizer-container">
+            <canvas id="visualizer-waveform"></canvas>
+            <canvas id="visualizer-bars" class="visualizer-bars"></canvas>
+          </div>
+          <audio id="output-audio" class="output-audio" controls preload="metadata" hidden aria-label="Reproduzir o WAV concluído"></audio>
+        </div>
+        <div class="metrics-panel">
+          <h2 class="metrics-panel__title">Desempenho</h2>
+          <div class="metric"><span class="metric__label">Primeiro áudio</span><strong><span id="stat-ttfb">--</span> ms</strong><div class="metric__bar"><span id="ttfb-bar"></span></div></div>
+          <div class="metric metric--highlight"><span class="metric__label">Velocidade local</span><strong><span id="stat-rtfx">--</span>×</strong><small id="rtfx-context">acima de 1× = mais rápido que o áudio</small></div>
+          <div class="metric metric--status"><span class="metric__label">Modelo</span><div class="model-status" id="model-status"><span class="model-status__dot"></span><span class="model-status__text">Baixando pela primeira vez</span></div></div>
+        </div>
+      </section>
+
+      <footer>
+        <p>Use somente sua voz ou uma voz com autorização específica.</p>
+        <p>Motor <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank" rel="noopener noreferrer">Pocket TTS</a> · export ONNX comunitário CC BY-NC 4.0 · somente preview gratuito e não comercial.</p>
+      </footer>
+    </main>
+  </body>
+</html>

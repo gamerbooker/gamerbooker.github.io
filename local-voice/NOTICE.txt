@@ -1,0 +1,22 @@
+Audioria Local Voice bundles, verifies, and adapts the reviewed browser-runtime
+snapshot from KevinAHM/pocket-tts-web under public/local-voice/vendor. The
+upstream browser integration is unofficial; its
+source code is Apache License 2.0 (a full copy is bundled as CODE-LICENSE.txt).
+Its current ONNX export separately declares CC BY-NC 4.0 in onnx/ONNX-LICENSE, and its bundled
+voice catalog mixes CC0, CC BY 4.0, and CC BY-NC 4.0 sources. For that reason,
+this exact local engine is limited to Audioria's free, non-commercial evidence
+preview and must not be used as the engine of a paid plan.
+
+Pocket TTS's official code is MIT and its official model weights are CC BY 4.0.
+A commercial Audioria release requires a reproducible export from those
+official weights plus an independently cleared voice pack, or a separately
+licensed cloud engine. The built-in catalog from this community bundle is not
+exposed as a commercial preset.
+
+Runtime source: https://huggingface.co/spaces/KevinAHM/pocket-tts-web
+Runtime code license: https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/CODE-LICENSE
+Model source: https://huggingface.co/kyutai/pocket-tts
+Community ONNX license: https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
+Voice-source licenses: https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
+Audioria modifications: same-origin vendoring, Portuguese-first bootstrap,
+integrity pinning, local UX, and consent-first integration.

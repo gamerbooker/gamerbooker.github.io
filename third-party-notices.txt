@@ -1,0 +1,43 @@
+AUDIORIA V0.7 — AVISOS DE TERCEIROS
+
+OpenAI Whisper — MIT
+https://github.com/openai/whisper
+
+Transformers.js — Apache-2.0
+https://github.com/huggingface/transformers.js
+
+ONNX Runtime Web — MIT
+https://github.com/microsoft/onnxruntime
+
+fix-webm-duration 1.0.6 — MIT
+Copyright (c) 2018 Yury Sitnikov
+https://github.com/yusitnikov/fix-webm-duration
+O texto integral da licença acompanha o motor em /local-voice/FIX-WEBM-DURATION-LICENSE.txt.
+
+Pocket TTS — código MIT; pesos oficiais CC BY 4.0
+https://github.com/kyutai-labs/pocket-tts
+https://huggingface.co/kyutai/pocket-tts
+
+Pocket TTS Web — código da integração no navegador sob Apache License 2.0.
+Uma cópia integral está em /local-voice/CODE-LICENSE.txt.
+https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/CODE-LICENSE
+
+Pocket TTS Web (artefatos ONNX comunitários do preview) — separadamente, o arquivo
+onnx/ONNX-LICENSE do snapshot usado declara CC BY-NC 4.0; o catálogo agregado
+também inclui vozes CC BY-NC. Este runtime é usado apenas na demonstração
+gratuita e não está liberado como motor de um plano pago.
+https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
+https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
+
+Mediabunny 1.55.2 e @mediabunny/mp3-encoder 1.55.2 — MPL-2.0
+Fonte exata: https://github.com/Vanilagy/mediabunny/tree/v1.55.2
+
+LAME MP3 Encoder 3.100 — LGPL; usado somente para codificação MP3. O build
+empregado pelo pacote desativa decoder e frontend. O Audioria não modifica LAME.
+Licença: https://lame.sourceforge.io/license.txt
+Fonte: https://sourceforge.net/projects/lame/files/lame/
+Bridge, fonte correspondente e instruções de rebuild:
+https://github.com/Vanilagy/mediabunny/tree/v1.55.2/packages/mp3-encoder
+
+Avisos completos do projeto:
+https://github.com/kyutai-labs/pocket-tts
