@@ -1,4 +1,4 @@
-import { STUDIO_MODEL_FILES, STUDIO_VOICES } from "./quality-config.js?v=6.5.1";
+import { STUDIO_MODEL_FILES, STUDIO_VOICES } from "./quality-config.js?v=6.5.2";
 
 export const STUDIO_VOICE_LOADER_KEY = "__audioria_studio_voice_650";
 
@@ -39,21 +39,8 @@ export function installStudioVoiceRuntime(source) {
         predefinedVoiceRecords = { [voiceName]: await globalThis[${JSON.stringify(STUDIO_VOICE_LOADER_KEY)}](voiceName) };
     }`,
   );
-  // Build graphs sequentially to avoid five simultaneous compilation peaks.
-  source = replaceOne(source,
-    `    const [encoderRes, textCondRes, flowMainRes, flowFlowRes, decoderRes] = await Promise.all([
-        ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.mimi_encoder), sessionOptions),
-        ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.text_conditioner), sessionOptions),
-        ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.flow_lm_main), sessionOptions),
-        ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.flow_lm_flow), sessionOptions),
-        ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.mimi_decoder), sessionOptions),
-    ]);`,
-    `    const encoderRes = await ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.mimi_encoder), sessionOptions);
-    const textCondRes = await ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.text_conditioner), sessionOptions);
-    const flowMainRes = await ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.flow_lm_main), sessionOptions);
-    const flowFlowRes = await ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.flow_lm_flow), sessionOptions);
-    const decoderRes = await ort.InferenceSession.create(bundlePath(language, MODEL_STEMS.mimi_decoder), sessionOptions);`,
-  );
+  // Graph loading is handled by the shared, sequential session loader so the
+  // Essential profile receives the same download and initialization protection.
   // One conditioned voice at a time: each 24-layer state is ~197 MB. Rebuild
   // from its small reference when switching; never keep a growing voice cache.
   source = replaceOne(source,

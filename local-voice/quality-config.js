@@ -22,6 +22,20 @@ export const STUDIO_MODEL_FILES = Object.freeze({
   mimi_decoder: "mimi_decoder.onnx",
 });
 
+// Exact byte lengths from the pinned repositories, not download estimates.
+export const STUDIO_ASSET_BYTES = Object.freeze({
+  "bundle.json": 42247, "tokenizer.model": 60995, "bos_before_voice.npy": 4224,
+  "mimi_encoder.onnx": 39768446, "text_conditioner.onnx": 16388344,
+  "flow_lm_main_int8.onnx": 305144125, "flow_lm_flow.onnx": 39097095,
+  "mimi_decoder.onnx": 41471926, "rafael.safetensors": 24777760,
+});
+export const STANDARD_PT_ASSET_BYTES = Object.freeze({
+  "bundle.json": 24371, "tokenizer.model": 60995, "bos_before_voice.npy": 4224,
+  "mimi_encoder_int8.onnx": 20779616, "text_conditioner_int8.onnx": 16388384,
+  "flow_lm_main_int8.onnx": 76341079, "flow_lm_flow_int8.onnx": 9962530,
+  "mimi_decoder_int8.onnx": 22684077, "voices.bin": 52401928,
+});
+
 // These are model-specific 24-layer states, never states from the small model.
 export const STUDIO_VOICES = Object.freeze(["rafael", "alba", "azelma", "cosette"]);
 

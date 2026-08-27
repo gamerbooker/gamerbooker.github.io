@@ -1,6 +1,6 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.1";
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.1";
-import { resolveVoiceQuality } from "./quality-config.js?v=6.5.1";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.2";
+import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.2";
+import { resolveVoiceQuality } from "./quality-config.js?v=6.5.2";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -17,8 +17,17 @@ function reportParentBootFailure(code, error) {
   window.parent.postMessage({
     protocolVersion: PROTOCOL_VERSION,
     type: "audioria:voice-error",
-    requestId: null,
+    requestId: globalThis.__audioriaVoiceBootRequestId ?? null,
     code,
+    message: code === "engine_audio_failed"
+      ? "O navegador não conseguiu iniciar o áudio. Recarregue a página ou experimente outro navegador atualizado."
+      : code === "engine_worker_crashed"
+        ? "O navegador interrompeu o motor. Seu texto e sua amostra foram mantidos; tente novamente ou escolha Essencial."
+        : /preparar o modelo|INITIALIZATION|memory|allocate/iu.test(String(error))
+          ? "Os arquivos chegaram, mas não foi possível preparar o modelo neste aparelho. Feche outras abas e tente novamente, ou escolha Essencial."
+          : /download|fetch|conexão|baixar|network/iu.test(String(error))
+            ? "Não foi possível concluir o download. Os arquivos completos foram mantidos; tente novamente para continuar."
+            : "O motor não conseguiu iniciar. Seu texto e sua amostra foram mantidos; tente novamente.",
   }, window.location.origin);
 }
 
@@ -40,6 +49,10 @@ Object.defineProperty(globalThis, WORKER_MODEL_PROGRESS_HOOK, {
       totalBytes: detail.totalBytes,
       file: detail.file,
       phase: detail.phase,
+      current: detail.current,
+      total: detail.total,
+      attempt: detail.attempt,
+      attempts: detail.attempts,
     }, window.location.origin);
   },
 });
@@ -71,7 +84,7 @@ async function boot() {
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
   inferenceWorkerUrl.searchParams.set("quality", new URLSearchParams(window.location.search).get("quality") === "studio" ? "studio" : "standard");
-  inferenceWorkerUrl.searchParams.set("release", "6.5.1");
+  inferenceWorkerUrl.searchParams.set("release", "6.5.2");
   const replacements = [
     [
       "this.handleVoiceEncoded(voiceName);",
@@ -97,7 +110,26 @@ async function boot() {
     ],
     [
       'new Worker("./inference-worker.js?v=16", { type: "module" })',
-      `new Worker("${inferenceWorkerUrl.href}", { type: "module" })`,
+      `(() => {
+        try {
+          const worker = new Worker("${inferenceWorkerUrl.href}", { type: "module" });
+          const failed = (event) => {
+            globalThis[${JSON.stringify(WORKER_BOOT_ERROR_HOOK)}]?.("engine_worker_crashed", event.error || event.message);
+            worker.terminate();
+          };
+          worker.addEventListener("error", failed);
+          worker.addEventListener("messageerror", failed);
+          return worker;
+        } catch (error) {
+          globalThis[${JSON.stringify(WORKER_BOOT_ERROR_HOOK)}]?.("engine_worker_crashed", error);
+          throw error;
+        }
+      })()`,
+    ],
+    [
+      'this.updateStatus(`Audio init failed: ${err.message}`, "error");',
+      `globalThis[${JSON.stringify(WORKER_BOOT_ERROR_HOOK)}]?.("engine_audio_failed", err);
+            this.updateStatus(\`Audio init failed: \${err.message}\`, "error");`,
     ],
     [
       'case "model_status":\n                    this.updateModelStatus(status, text);\n                    break;',

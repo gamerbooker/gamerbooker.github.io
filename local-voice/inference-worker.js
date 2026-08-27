@@ -1,8 +1,10 @@
-import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.1";
-import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.1";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.1";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.1";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.1";
+import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.2";
+import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_PT_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.2";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.2";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.2";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.2";
+import { createModelAssetLoader } from "./model-download.js?v=6.5.2";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.2";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
@@ -36,6 +38,7 @@ const SENTENCEPIECE_MODULE_KEY = `__audioria_sentencepiece_${SENTENCEPIECE_SHA25
 const TEXT_CHUNKER_KEY = "__audioria_unicode_chunker_640";
 const EXPECTED_PORTUGUESE_BUNDLE_BYTES = QUALITY.downloadBytes;
 const modelTransferBytes = new Map();
+let compiledModelGraphs = 0;
 let lastModelProgressAt = 0;
 const pendingMessages = [];
 const capturePendingMessage = (event) => {
@@ -87,7 +90,7 @@ function isTrustedModelResponse(response) {
     && !url.pathname.includes("%");
 }
 
-function reportModelTransfer(url, loadedBytes, contentLength = 0, phase = "download") {
+function reportModelTransfer(url, loadedBytes, contentLength = 0, phase = "download", detail = {}) {
   const safeLoaded = Number.isFinite(loadedBytes) ? Math.max(0, loadedBytes) : 0;
   const safeLength = Number.isFinite(contentLength) ? Math.max(0, contentLength) : 0;
   modelTransferBytes.set(url, { loaded: safeLoaded, total: safeLength });
@@ -95,10 +98,11 @@ function reportModelTransfer(url, loadedBytes, contentLength = 0, phase = "downl
     loaded: sum.loaded + value.loaded,
     total: sum.total + value.total,
   }), { loaded: 0, total: 0 });
-  const expected = Math.max(EXPECTED_PORTUGUESE_BUNDLE_BYTES, aggregate.total);
+  const exactBundle = QUALITY.id === "studio" ? STUDIO_ASSET_BYTES : startup.locale === "pt-BR" ? STANDARD_PT_ASSET_BYTES : null;
+  const expected = Math.max(exactBundle ? Object.values(exactBundle).reduce((sum, size) => sum + size, 0) : EXPECTED_PORTUGUESE_BUNDLE_BYTES, aggregate.total);
   const now = Date.now();
   const complete = safeLength > 0 && safeLoaded >= safeLength;
-  if (!complete && safeLoaded > 0 && now - lastModelProgressAt < 250) return;
+  if (["download", "cache"].includes(phase) && !complete && safeLoaded > 0 && now - lastModelProgressAt < 250) return;
   lastModelProgressAt = now;
   self.postMessage({
     type: "audioria_model_progress",
@@ -106,41 +110,35 @@ function reportModelTransfer(url, loadedBytes, contentLength = 0, phase = "downl
     file: new URL(url).pathname.split("/").pop() || "modelo",
     loadedBytes: aggregate.loaded,
     totalBytes: expected,
-    progress: Math.min(99, aggregate.loaded / expected * 100),
+    progress: Math.min(99, Math.min(1, aggregate.loaded / expected) * 84 + compiledModelGraphs / 5 * 16),
+    ...detail,
   });
 }
 
-function trackModelResponse(response, requestUrl) {
-  const contentLength = Number(response.headers.get("content-length")) || 0;
-  if (!response.body) {
-    reportModelTransfer(requestUrl, contentLength, contentLength, "complete");
-    return response;
-  }
-  let loaded = 0;
-  reportModelTransfer(requestUrl, 0, contentLength, "download");
-  const trackedBody = response.body.pipeThrough(new TransformStream({
-    transform(chunk, controller) {
-      loaded += chunk.byteLength;
-      reportModelTransfer(requestUrl, loaded, contentLength, "download");
-      controller.enqueue(chunk);
-    },
-    flush() {
-      reportModelTransfer(requestUrl, Math.max(loaded, contentLength), contentLength, "complete");
-    },
-  }));
-  return new Response(trackedBody, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
+function reportModelInitialization(detail) {
+  if (detail.phase === "initialized") compiledModelGraphs = detail.current;
+  const entry = Array.from(modelTransferBytes.entries()).find(([url]) => new URL(url).pathname.endsWith(`/${detail.file}`));
+  if (!entry) return;
+  reportModelTransfer(entry[0], entry[1].loaded, entry[1].total, detail.phase, { current: detail.current, total: detail.total });
 }
 
 function installVersionedModelCache() {
   const networkFetch = globalThis.fetch.bind(globalThis);
-
+  const loader = createModelAssetLoader({
+    networkFetch,
+    cacheName: MODEL_CACHE_NAME,
+    isTrustedResponse: isTrustedModelResponse,
+    expectedBytes: (value) => {
+      const url = new URL(value);
+      const name = url.pathname.split("/").pop();
+      if (QUALITY.id === "studio") return STUDIO_ASSET_BYTES[name] ?? 0;
+      return url.pathname.includes("/onnx/portuguese/") ? STANDARD_PT_ASSET_BYTES[name] ?? 0 : 0;
+    },
+    report: ({ url, loadedBytes, totalBytes, phase, attempt, attempts }) => reportModelTransfer(url, loadedBytes, totalBytes, phase, { attempt, attempts }),
+  });
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    if (!isTrustedModelRequest(request) || !("caches" in globalThis)) {
+    if (!isTrustedModelRequest(request)) {
       try {
         return await networkFetch(request);
       } catch (error) {
@@ -149,49 +147,7 @@ function installVersionedModelCache() {
       }
     }
 
-    // Deliberately strip caller headers and credentials. Pocket model assets
-    // are public, immutable inputs and must never inherit application secrets.
-    // Model requests stay on Audioria's exact, revision-pinned proxy route.
-    // The edge proxy owns upstream redirects and its exact file allowlist.
-    const cacheRequest = new Request(request.url, {
-      method: "GET",
-      mode: "cors",
-      credentials: "omit",
-      redirect: "follow",
-      cache: "no-store",
-    });
-    let cache = null;
-    try {
-      cache = await globalThis.caches.open(MODEL_CACHE_NAME);
-      const cached = await cache.match(cacheRequest);
-      if (cached) {
-        const cachedLength = Number(cached.headers.get("content-length")) || 0;
-        reportModelTransfer(cacheRequest.url, cachedLength, cachedLength, "cache");
-        return cached;
-      }
-    } catch {
-      // Private browsing/storage denial must not make the voice engine fail.
-      cache = null;
-    }
-
-    let response;
-    try {
-      response = await networkFetch(cacheRequest);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "network error";
-      throw new TypeError(`Pocket TTS fetch failed for ${new URL(cacheRequest.url).pathname}: ${detail}`);
-    }
-    if (!isTrustedModelResponse(response)) {
-      throw new TypeError("Pocket TTS model redirect rejected");
-    }
-    const trackedResponse = trackModelResponse(response, cacheRequest.url);
-    if (cache && trackedResponse.ok) {
-      // The cache namespace follows the reviewed runtime SHA. This avoids
-      // mixing model bundles across runtime revisions; it is not a claim that
-      // the remotely hosted weight files have their own content hashes.
-      void cache.put(cacheRequest, trackedResponse.clone()).catch(() => {});
-    }
-    return trackedResponse;
+    return loader(request);
   };
 }
 
@@ -383,6 +339,14 @@ async function boot() {
     writable: false,
   });
   installVersionedModelCache();
+  Object.defineProperty(globalThis, MODEL_SESSION_LOADER_KEY, {
+    value: (files, createSession) => loadModelSessions(files, createSession, {
+      fetchModel: globalThis.fetch,
+      onStage: reportModelInitialization,
+    }),
+    configurable: false,
+    writable: false,
+  });
   if (QUALITY.id === "studio") {
     Object.defineProperty(globalThis, STUDIO_VOICE_LOADER_KEY, {
       value: async (name) => {
@@ -411,6 +375,7 @@ async function boot() {
   let source = installDurationGuard(workerSource);
   source = installReferenceRuntime(source);
   if (QUALITY.id === "studio") source = installStudioVoiceRuntime(source);
+  source = installModelSessionRuntime(source);
   source = source
     .replace(
       'const DEFAULT_LANGUAGE = "english_2026-04";',
@@ -459,7 +424,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.5.1" });
+  self.postMessage({ type: "audioria_runtime", version: "6.5.2" });
 }
 
 try {

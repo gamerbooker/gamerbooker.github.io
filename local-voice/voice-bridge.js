@@ -6,8 +6,8 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.1";
-import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.1";
+} from "./text-pipeline.js?v=6.5.2";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.2";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -195,6 +195,7 @@ export function installLocalVoiceBridge(app) {
   const originalHandleVoiceEncoded = app.handleVoiceEncoded.bind(app);
   const queue = [];
   const recentRequestIds = [];
+  const referenceRequestIds = [];
   const inFlightRequestIds = new Set();
   const languageWaiters = new Map();
   const voiceWaiters = new Set();
@@ -829,6 +830,7 @@ export function installLocalVoiceBridge(app) {
     if (message.type === "audioria:voice-reference") {
       try {
         const requestId = requestIdOf(message.requestId, { required: false });
+        if (requestId && referenceRequestIds.includes(requestId)) return;
         const file = message.file;
         if (!(file instanceof Blob) || file.size < 1 || file.size > MAX_REFERENCE_BYTES) {
           throw new RangeError("A amostra deve ser um Blob/File de até 64 MB.");
@@ -837,6 +839,11 @@ export function installLocalVoiceBridge(app) {
           throw new RangeError("A amostra deve conter áudio ou vídeo decodificável.");
         }
         const language = resolveVoiceLanguage(message.language ?? app.currentLanguage, { strict: true });
+        if (queue.filter((task) => task.kind === "reference").length >= MAX_PENDING_SYNTHESIS) throw new Error("A fila local de referências está cheia.");
+        if (requestId) {
+          referenceRequestIds.push(requestId);
+          if (referenceRequestIds.length > 64) referenceRequestIds.shift();
+        }
         queue.push({ kind: "reference", requestId, file, language: language.engineLanguage });
         postProgress(requestId, 4, "queued");
         postToParent({

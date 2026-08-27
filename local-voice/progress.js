@@ -8,6 +8,7 @@ export const VOICE_PROGRESS = Object.freeze({
 
 export const VOICE_TIMEOUTS = Object.freeze({
   bootIdleMs: 300_000,
+  initializationIdleMs: 900_000,
   preparationIdleMs: 900_000,
   synthesisIdleMs: 900_000,
 });
