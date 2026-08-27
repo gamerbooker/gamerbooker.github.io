@@ -1,4 +1,4 @@
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.3.0";
+import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.4.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
@@ -14,6 +14,7 @@ const MODEL_PATH_PREFIX = STATIC_PUBLIC_HOST
   : `/api/models/pocket-tts/${MODEL_REVISION}/onnx/`;
 const MODEL_CACHE_NAME = `audioria-pocket-models-${MODEL_REVISION}-${WORKER_SHA256}`;
 const SENTENCEPIECE_MODULE_KEY = `__audioria_sentencepiece_${SENTENCEPIECE_SHA256.slice(0, 16)}`;
+const TEXT_CHUNKER_KEY = "__audioria_unicode_chunker_640";
 const EXPECTED_PORTUGUESE_BUNDLE_BYTES = 190 * 1024 * 1024;
 const modelTransferBytes = new Map();
 let lastModelProgressAt = 0;
@@ -225,6 +226,33 @@ function installDurationGuard(workerSource) {
   );
   source = replaceExactlyOnce(
     source,
+    "    if (prompt && !/[A-ZÀ-Þ]/.test(prompt[0])) {",
+    "    if (/^\\p{Ll}/u.test(prompt) && !/^\\p{Ll}[\\p{L}\\p{M}\\p{N}]*\\p{Lu}/u.test(prompt.split(/\\s+/u)[0])) {",
+    "da preservação de nomes com caixa mista",
+  );
+  const chunkerStart = source.indexOf("function splitTokenIdsIntoChunks(");
+  const chunkerEnd = source.indexOf("\nfunction precomputeFlowBuffers(", chunkerStart);
+  if (chunkerStart < 0 || chunkerEnd <= chunkerStart) {
+    throw new Error("O divisor de texto não corresponde ao motor revisado.");
+  }
+  source = replaceExactlyOnce(
+    source,
+    source.slice(chunkerStart, chunkerEnd),
+    `function splitIntoBestSentences(text) {
+    const prepared = prepareTextPrompt(text.normalize("NFC"));
+    const chunks = globalThis[${JSON.stringify(TEXT_CHUNKER_KEY)}](prepared.text, {
+        encode: (candidate) => tokenizerProcessor.encodeIds(candidate),
+        maxTokens: currentMaxTokenPerChunk,
+        language: currentLanguage,
+        prepareText: (candidate) => prepareTextPrompt(candidate).text,
+    });
+    return { chunks, framesAfterEos: prepared.framesAfterEos };
+}
+`,
+    "da divisão Unicode sem fragmentar palavras nem acentos",
+  );
+  source = replaceExactlyOnce(
+    source,
     "            const isEos = eosLogit > -4.0;",
     "            const isEos = eosLogit > -4.0 && step >= audioriaMinimumFrames;",
     "do piso anti-EOS precoce",
@@ -302,6 +330,11 @@ async function boot() {
     fetchPinnedSource("sentencepiece.js?v=3", SENTENCEPIECE_SHA256),
   ]);
   await installPinnedSentencePiece(sentencePieceSource);
+  Object.defineProperty(globalThis, TEXT_CHUNKER_KEY, {
+    value: splitVoiceTextByTokens,
+    configurable: false,
+    writable: false,
+  });
   installVersionedModelCache();
 
   const sentencePieceImport = 'await import("./sentencepiece.js?v=3")';
@@ -339,7 +372,7 @@ async function boot() {
   }
   source = source.replaceAll(
     runtimeErrorPost,
-    'postMessage({ type: "error", error: "AUDIORIA_RUNTIME_630: " + (err?.stack || err?.toString() || "unknown error") });',
+    'postMessage({ type: "error", error: "AUDIORIA_RUNTIME_640: " + (err?.stack || err?.toString() || "unknown error") });',
   );
 
   const moduleUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
@@ -355,7 +388,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.3.0" });
+  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.4.0" });
 }
 
 try {
@@ -364,6 +397,6 @@ try {
   self.removeEventListener("message", capturePendingMessage);
   self.postMessage({
     type: "error",
-    error: `AUDIORIA_BOOT_630: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
+    error: `AUDIORIA_BOOT_640: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
   });
 }

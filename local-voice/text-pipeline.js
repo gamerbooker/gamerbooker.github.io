@@ -96,6 +96,29 @@ const EMOJI_RESIDUE = Object.freeze([
 // from being mistaken for an HTML tag while still removing common markup.
 const HTML_TAG = /<\/?(?:a|abbr|article|aside|b|blockquote|body|br|button|code|div|em|figcaption|figure|footer|h[1-6]|head|header|hr|html|i|img|label|li|link|main|mark|meta|nav|ol|p|pre|script|section|small|span|strong|style|sub|sup|table|tbody|td|th|thead|title|tr|u|ul)(?:\s+[^<>\n]{0,220})?\s*\/?>/giu;
 const HTML_COMMENT = /<!--[\s\S]*?-->/gu;
+const HTML_ENTITIES = Object.freeze({
+  amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
+  hellip: "…", ndash: "–", mdash: "—",
+  ...Object.fromEntries([
+    ["agrave", "à"], ["aacute", "á"], ["acirc", "â"], ["atilde", "ã"], ["auml", "ä"],
+    ["egrave", "è"], ["eacute", "é"], ["ecirc", "ê"], ["euml", "ë"],
+    ["igrave", "ì"], ["iacute", "í"], ["icirc", "î"], ["iuml", "ï"],
+    ["ograve", "ò"], ["oacute", "ó"], ["ocirc", "ô"], ["otilde", "õ"], ["ouml", "ö"],
+    ["ugrave", "ù"], ["uacute", "ú"], ["ucirc", "û"], ["uuml", "ü"],
+    ["ccedil", "ç"], ["ntilde", "ñ"], ["yacute", "ý"],
+  ].flatMap(([name, character]) => [[name, character], [name[0].toUpperCase() + name.slice(1), character.toUpperCase()]])),
+});
+
+function decodeSpeechEntities(input) {
+  return input.replace(/&(#(?:x[\da-f]{1,6}|\d{1,7})|[a-z][a-z\d]{1,31});/giu, (entity, name) => {
+    if (name[0] !== "#") return HTML_ENTITIES[name] ?? entity;
+    const hexadecimal = /^#x/iu.test(name);
+    const point = Number.parseInt(name.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
+    return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+      ? String.fromCodePoint(point)
+      : " ";
+  });
+}
 const EMOJI = (() => {
   try {
     return new RegExp("\\p{Extended_Pictographic}", "gu");
@@ -182,7 +205,7 @@ export function normalizeVoiceText(input, language = "portuguese") {
     : profile.locale === "es-ES"
       ? { at: " arroba ", code: " código omitido ", dot: " punto ", link: " enlace " }
       : { at: " arroba ", code: " código omitido ", dot: " ponto ", link: " link " };
-  let value = withoutUnsafeCodePoints(input.normalize("NFKC"))
+  let value = withoutUnsafeCodePoints(decodeSpeechEntities(input).normalize("NFKC"))
     .replace(/\r\n?/gu, "\n")
     .replace(BIDI_OR_ZERO_WIDTH, "")
     .replace(TYPOGRAPHIC_QUOTES, '"')
@@ -206,8 +229,8 @@ export function normalizeVoiceText(input, language = "portuguese") {
     .replace(/^\s{0,3}#{1,6}\s+/gmu, "")
     .replace(/^\s*[-+*]\s+/gmu, ". ")
     .replace(/[*_]{1,3}/gu, "")
-    .replace(/R\$\s*(\d+(?:[.,]\d{1,2})?)/giu, "$1 reais")
-    .replace(/US\$\s*(\d+(?:[.,]\d{1,2})?)/giu, "$1 US dollars");
+    .replace(/R\$\s*(\d+(?:[.,]\d+)*)/giu, "$1 reais")
+    .replace(/US\$\s*(\d+(?:[.,]\d+)*)/giu, "$1 US dollars");
 
   value = replaceSymbols(value, profile)
     .replace(/[`^~|\\{}()]/gu, " ")
@@ -245,6 +268,83 @@ function segmentSentences(value, locale) {
     });
   }
   return result.length ? result : [{ text: value, paragraphBreakAfter: false }];
+}
+
+/**
+ * Split the ORIGINAL Unicode text at word boundaries under the actual model
+ * token budget. SentencePiece IDs are not characters: byte-fallback tokens
+ * for one accented letter may span several IDs. Decoding arbitrary ID slices
+ * can therefore turn AÇÃO into AÇ� / �O, particularly in uppercase prompts.
+ * Count tokens, but never decode a partial token sequence back into text.
+ */
+export function splitVoiceTextByTokens(input, {
+  encode,
+  maxTokens = 50,
+  language = "portuguese",
+  prepareText = (text) => text,
+} = {}) {
+  if (typeof input !== "string" || typeof encode !== "function" || typeof prepareText !== "function") {
+    throw new TypeError("A divisão de voz exige texto e um tokenizador válido.");
+  }
+  if (!Number.isInteger(maxTokens) || maxTokens < 8 || maxTokens > 256) {
+    throw new RangeError("O limite do tokenizador deve estar entre 8 e 256.");
+  }
+  const text = input.normalize("NFC").replace(/\s+/gu, " ").trim();
+  if (!text) return [];
+  if (!/[\p{L}\p{N}]/u.test(text)) throw new RangeError("Digite palavras para gerar voz, não apenas pontuação.");
+  if (codePointLength(text) > MAX_INPUT_CHARACTERS) throw new RangeError("Texto longo demais para o motor local.");
+  const fits = (candidate) => {
+    // Include the model's per-phrase capitalization, punctuation and short
+    // prompt padding in the budget, not just the visible input characters.
+    const ids = encode(prepareText(candidate));
+    return ids.length > 0 && ids.length <= maxTokens;
+  };
+  if (fits(text)) return [text];
+  const locale = resolveVoiceLanguage(language).locale;
+  const naturalSentences = segmentSentences(text, locale).map((segment) => segment.text);
+  // Intl may split `Olá!Tudo bem?` without an existing separator. Keep the
+  // original spelling rather than silently manufacture whitespace there.
+  const sentences = naturalSentences.join(" ") === text ? naturalSentences : [text];
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (fits(sentence)) {
+      const combined = current ? `${current} ${sentence}` : sentence;
+      if (fits(combined)) current = combined;
+      else {
+        if (current) chunks.push(current);
+        current = sentence;
+      }
+      continue;
+    }
+    if (current) { chunks.push(current); current = ""; }
+    const words = sentence.split(/\s+/u);
+    let start = 0;
+    while (start < words.length) {
+      let end = start;
+      let lastPause = -1;
+      while (end < words.length && fits(words.slice(start, end + 1).join(" "))) {
+        if (/[,;:!?…]["')\]]*$/u.test(words[end])) lastPause = end + 1;
+        end += 1;
+      }
+      if (end === start) {
+        // An unbroken identifier longer than the whole context cannot be
+        // pronounced faithfully. Explain the limit instead of corrupting it.
+        throw new RangeError("Uma palavra ou código excede o contexto da voz. Revise sequências muito longas sem espaços.");
+      }
+      if (end < words.length && lastPause >= start + Math.ceil((end - start) * 0.5)) end = lastPause;
+      const chunk = words.slice(start, end).join(" ");
+      if (end === words.length) current = chunk;
+      else chunks.push(chunk);
+      start = end;
+    }
+  }
+  if (current) chunks.push(current);
+  // Defense-in-depth: nothing may be dropped, duplicated or re-encoded.
+  if (chunks.join(" ") !== text || chunks.some((chunk) => !fits(chunk) || !/[\p{L}\p{N}]/u.test(chunk))) {
+    throw new Error("O texto não pôde ser dividido sem alterar seu conteúdo.");
+  }
+  return chunks;
 }
 
 function findPreferredCut(characters, maximum) {

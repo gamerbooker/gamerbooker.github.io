@@ -6,7 +6,7 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.3.0";
+} from "./text-pipeline.js?v=6.4.0";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
