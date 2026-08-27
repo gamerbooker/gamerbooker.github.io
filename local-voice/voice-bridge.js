@@ -6,7 +6,7 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.4.0";
+} from "./text-pipeline.js?v=6.5.0";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -281,7 +281,8 @@ export function installLocalVoiceBridge(app) {
     engineReady = true;
     postToParent({
       type: "audioria:voice-engine-ready",
-      languages: ["pt-BR", "en-US", "es-ES"],
+      languages: app.audioriaQuality === "studio" ? ["pt-BR"] : ["pt-BR", "en-US", "es-ES"],
+      quality: app.audioriaQuality === "studio" ? "studio" : "standard",
       execution: "local-browser-only",
     });
     void pumpQueue();
@@ -321,6 +322,9 @@ export function installLocalVoiceBridge(app) {
 
   const ensureLanguage = async (language) => {
     const resolved = resolveVoiceLanguage(language, { strict: true });
+    if (app.audioriaQuality === "studio" && resolved.locale !== "pt-BR") {
+      throw new RangeError("O modo Estúdio usa português. Troque o idioma na Audioria para carregar outro motor.");
+    }
     await ensureEngineReady();
     if (app.currentLanguage === resolved.engineLanguage && !app.isVoicePreparing) return resolved;
 

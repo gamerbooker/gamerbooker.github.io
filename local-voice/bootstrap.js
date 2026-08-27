@@ -1,5 +1,6 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.4.0";
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.4.0";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.0";
+import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.0";
+import { resolveVoiceQuality } from "./quality-config.js?v=6.5.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -69,7 +70,8 @@ async function boot() {
   const workletProbeUrl = new URL("/local-voice/empty-worklet.js", window.location.origin).href;
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
-  inferenceWorkerUrl.searchParams.set("release", "6.4.0");
+  inferenceWorkerUrl.searchParams.set("quality", new URLSearchParams(window.location.search).get("quality") === "studio" ? "studio" : "standard");
+  inferenceWorkerUrl.searchParams.set("release", "6.5.0");
   const replacements = [
     // Audioria owns the final PCM taper. The upstream 480-sample (20 ms)
     // in-place fade ran before capture and could attenuate a first phoneme.
@@ -122,6 +124,7 @@ async function boot() {
   try {
     await import(moduleUrl);
     if (!window.app) throw new Error("O runtime local não expôs a instância revisada.");
+    window.app.audioriaQuality = resolveVoiceQuality(new URLSearchParams(window.location.search).get("quality"), startupLanguage.locale).id;
     installLocalVoiceBridge(window.app);
   } finally {
     URL.revokeObjectURL(moduleUrl);

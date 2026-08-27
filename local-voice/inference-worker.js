@@ -1,21 +1,39 @@
-import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.4.0";
+import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.0";
+import { canUseStudioVoice, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.0";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.0";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
+const startup = resolveStartupVoiceLanguage(self.location.search);
+const QUALITY = resolveVoiceQuality(new URLSearchParams(self.location.search).get("quality"), startup.locale);
 const STATIC_PUBLIC_HOST = self.location.hostname.endsWith(".github.io");
-const MODEL_BASE = STATIC_PUBLIC_HOST
+const MODEL_BASE = QUALITY.id === "studio"
+  ? STATIC_PUBLIC_HOST
+    ? `https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/${POCKET_STUDIO_REVISION}`
+    : `${self.location.origin}/api/models/pocket-studio/${POCKET_STUDIO_REVISION}`
+  : STATIC_PUBLIC_HOST
   ? `https://huggingface.co/spaces/KevinAHM/pocket-tts-web/resolve/${MODEL_REVISION}`
   : `${self.location.origin}/api/models/pocket-tts/${MODEL_REVISION}`;
 const WORKER_SHA256 = "dace0a022e17dffcf60fdb7b86e49facf093f709b352fb306c1d6641ae0f5366";
 const SENTENCEPIECE_SHA256 = "fc802c6945931e685d82d0f601cda185bb43990870d712119caf5ea74e6e9c56";
 const MODEL_ORIGIN = new URL(MODEL_BASE).origin;
-const MODEL_PATH_PREFIX = STATIC_PUBLIC_HOST
+const MODEL_PATH_PREFIX = QUALITY.id === "studio"
+  ? STATIC_PUBLIC_HOST
+    ? `/KevinAHM/pocket-tts-onnx/resolve/${POCKET_STUDIO_REVISION}/onnx/portuguese_24l/`
+    : `/api/models/pocket-studio/${POCKET_STUDIO_REVISION}/onnx/portuguese_24l/`
+  : STATIC_PUBLIC_HOST
   ? `/spaces/KevinAHM/pocket-tts-web/resolve/${MODEL_REVISION}/onnx/`
   : `/api/models/pocket-tts/${MODEL_REVISION}/onnx/`;
-const MODEL_CACHE_NAME = `audioria-pocket-models-${MODEL_REVISION}-${WORKER_SHA256}`;
+const STUDIO_VOICE_PATH_PREFIX = STATIC_PUBLIC_HOST
+  ? `/kyutai/pocket-tts-without-voice-cloning/resolve/${POCKET_STUDIO_VOICES_REVISION}/languages/portuguese_24l/embeddings/`
+  : `/api/models/pocket-studio-voices/${POCKET_STUDIO_VOICES_REVISION}/languages/portuguese_24l/embeddings/`;
+const MODEL_CACHE_NAME = QUALITY.id === "studio"
+  ? `audioria-pocket-models-studio-${POCKET_STUDIO_REVISION}-${POCKET_STUDIO_VOICES_REVISION}-v1`
+  : `audioria-pocket-models-${MODEL_REVISION}-${WORKER_SHA256}`;
 const SENTENCEPIECE_MODULE_KEY = `__audioria_sentencepiece_${SENTENCEPIECE_SHA256.slice(0, 16)}`;
 const TEXT_CHUNKER_KEY = "__audioria_unicode_chunker_640";
-const EXPECTED_PORTUGUESE_BUNDLE_BYTES = 190 * 1024 * 1024;
+const EXPECTED_PORTUGUESE_BUNDLE_BYTES = QUALITY.downloadBytes;
 const modelTransferBytes = new Map();
 let lastModelProgressAt = 0;
 const pendingMessages = [];
@@ -48,7 +66,8 @@ function isTrustedModelRequest(request) {
     && url.origin === MODEL_ORIGIN
     && url.username === ""
     && url.password === ""
-    && url.pathname.startsWith(MODEL_PATH_PREFIX)
+    && (url.pathname.startsWith(MODEL_PATH_PREFIX)
+      || (QUALITY.id === "studio" && url.pathname.startsWith(STUDIO_VOICE_PATH_PREFIX)))
     && !url.pathname.includes("%");
 }
 
@@ -62,7 +81,8 @@ function isTrustedModelResponse(response) {
   return url.origin === MODEL_ORIGIN
     && url.username === ""
     && url.password === ""
-    && url.pathname.startsWith(MODEL_PATH_PREFIX)
+    && (url.pathname.startsWith(MODEL_PATH_PREFIX)
+      || (QUALITY.id === "studio" && url.pathname.startsWith(STUDIO_VOICE_PATH_PREFIX)))
     && !url.pathname.includes("%");
 }
 
@@ -224,6 +244,32 @@ function installDurationGuard(workerSource) {
         );`,
     "do limite proporcional ao texto",
   );
+  // Match manifest fills for every dtype, including boolean first-call flags.
+  // This is a state-initialization fix, not a guarantee of word completeness.
+  source = replaceExactlyOnce(
+    source,
+    `    } else {
+        data = new Float32Array(size);
+        if (fill === "nan") {
+            data.fill(NaN);
+        } else if (fill === "ones") {
+            data.fill(1);
+        }
+    }
+
+    return data;`,
+    `    } else {
+        data = new Float32Array(size);
+    }
+    if (fill === "ones") {
+        data.fill(dtype === "int64" ? 1n : 1);
+    } else if (fill === "nan" && data instanceof Float32Array) {
+        data.fill(NaN);
+    }
+
+    return data;`,
+    "da inicialização tipada dos estados de primeira chamada",
+  );
   source = replaceExactlyOnce(
     source,
     "    if (prompt && !/[A-ZÀ-Þ]/.test(prompt[0])) {",
@@ -325,6 +371,9 @@ function installDurationGuard(workerSource) {
 
 async function boot() {
   const startupLanguage = resolveStartupVoiceLanguage(self.location.search);
+  if (QUALITY.id === "studio" && !canUseStudioVoice(navigator.deviceMemory, navigator.hardwareConcurrency)) {
+    throw new Error("O modo Estúdio precisa de um navegador que informe ao menos 8 GB de memória e 8 núcleos. Use o modo Essencial neste aparelho.");
+  }
   const [workerSource, sentencePieceSource] = await Promise.all([
     fetchPinnedSource("inference-worker.js", WORKER_SHA256),
     fetchPinnedSource("sentencepiece.js?v=3", SENTENCEPIECE_SHA256),
@@ -336,20 +385,43 @@ async function boot() {
     writable: false,
   });
   installVersionedModelCache();
+  if (QUALITY.id === "studio") {
+    Object.defineProperty(globalThis, STUDIO_VOICE_LOADER_KEY, {
+      value: async (name) => {
+        const pinnedUrl = studioVoiceUrl(name);
+        const voiceUrl = STATIC_PUBLIC_HOST ? pinnedUrl : `${self.location.origin}${STUDIO_VOICE_PATH_PREFIX}${name}.safetensors`;
+        const response = await fetch(voiceUrl);
+        if (!response.ok) throw new Error("Não foi possível carregar a referência de voz Estúdio.");
+        const bytes = await response.arrayBuffer();
+        if (name === "rafael") {
+          const digest = await crypto.subtle.digest("SHA-256", bytes);
+          const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+          if (hash !== "f51d1b95e3510c1a7b05efe81693cd52cdcde261464179cde8410a14b98ee5e6") throw new Error("Integridade da referência de voz não confirmada.");
+        }
+        return assertStudioVoiceState(parseVoiceSafetensors(bytes));
+      },
+      configurable: false,
+      writable: false,
+    });
+  }
 
   const sentencePieceImport = 'await import("./sentencepiece.js?v=3")';
   if (!workerSource.includes(sentencePieceImport)) {
     throw new Error("O runtime não contém a integração SentencePiece revisada.");
   }
 
-  let source = installDurationGuard(workerSource)
+  let source = installDurationGuard(workerSource);
+  if (QUALITY.id === "studio") source = installStudioVoiceRuntime(source);
+  source = source
     .replace(
       'const DEFAULT_LANGUAGE = "english_2026-04";',
       `const DEFAULT_LANGUAGE = ${JSON.stringify(startupLanguage.engineLanguage)};`,
     )
     .replace(
       'return `./onnx/${language}`;',
-      `return \`${MODEL_BASE}/onnx/\${language}\`;`,
+      QUALITY.id === "studio"
+        ? `return ${JSON.stringify(`${MODEL_BASE}/onnx/portuguese_24l`)};`
+        : `return \`${MODEL_BASE}/onnx/\${language}\`;`,
     )
     .replace(
       sentencePieceImport,
@@ -388,7 +460,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.4.0" });
+  self.postMessage({ type: "model_status", status: "loading", text: "Audioria runtime 6.5.0" });
 }
 
 try {
