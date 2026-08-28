@@ -1,13 +1,8 @@
 // Reviewed, immutable model profiles. No model is fetched by importing this file.
-export const POCKET_STANDARD_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
 export const POCKET_STUDIO_REVISION = "58a6d00cf13d239b6748cb0769f35c580a8f606c";
 export const POCKET_STUDIO_VOICES_REVISION = "e81d79e8194ad4c7ce879c87a4258ef20cbf2487";
 
 export const VOICE_QUALITY_PROFILES = Object.freeze({
-  standard: Object.freeze({
-    id: "standard", layers: 6, downloadBytes: 190 * 1024 * 1024,
-    recommendedDeviceMemoryGb: 0, recommendedThreads: 0,
-  }),
   studio: Object.freeze({
     id: "studio", layers: 24, downloadBytes: 466_755_162,
     recommendedDeviceMemoryGb: 8, recommendedThreads: 8,
@@ -29,30 +24,34 @@ export const STUDIO_ASSET_BYTES = Object.freeze({
   "flow_lm_main_int8.onnx": 305144125, "flow_lm_flow.onnx": 39097095,
   "mimi_decoder.onnx": 41471926, "rafael.safetensors": 24777760,
 });
-export const STANDARD_PT_ASSET_BYTES = Object.freeze({
-  "bundle.json": 24371, "tokenizer.model": 60995, "bos_before_voice.npy": 4224,
-  "mimi_encoder_int8.onnx": 20779616, "text_conditioner_int8.onnx": 16388384,
-  "flow_lm_main_int8.onnx": 76341079, "flow_lm_flow_int8.onnx": 9962530,
-  "mimi_decoder_int8.onnx": 22684077, "voices.bin": 52401928,
-});
-
 // These are model-specific 24-layer states, never states from the small model.
 export const STUDIO_VOICES = Object.freeze(["rafael", "alba", "azelma", "cosette"]);
 
-export function resolveVoiceQuality(value, language = "pt-BR") {
-  return value === "studio" && ["pt-BR", "portuguese"].includes(language)
-    ? VOICE_QUALITY_PROFILES.studio : VOICE_QUALITY_PROFILES.standard;
+export function resolveVoiceQuality(_value, language = "pt-BR") {
+  if (!["pt-BR", "portuguese"].includes(language)) {
+    throw new RangeError("O Estúdio desta edição gera voz em português do Brasil.");
+  }
+  return VOICE_QUALITY_PROFILES.studio;
 }
 
-// The public cloning workflow has one model, independent of TTS preferences.
+// Validate before starting network or model work. Old quality links cannot
+// select a removed model, and an unsupported language must never fall back.
+export function resolveStudioStartup(search = "") {
+  const language = new URLSearchParams(search).get("language") ?? "pt-BR";
+  if (!["pt-br", "pt", "portuguese"].includes(language.trim().toLowerCase())) {
+    throw new RangeError("O Estúdio desta edição gera voz em português do Brasil.");
+  }
+  return { engineLanguage: "portuguese", locale: "pt-BR", supported: true };
+}
+
+// Both public voice tasks use the same reviewed Portuguese Studio profile.
 export const CLONING_PROFILE = Object.freeze({ quality: "studio", language: "pt-BR" });
 
-export function resolveVoiceTaskProfile(action, quality, language) {
+export function resolveVoiceTaskProfile(action, quality, language = "pt-BR") {
   if (action === "clone") return CLONING_PROFILE;
-  if (action !== "tts" || !["pt-BR", "en-US", "es-ES"].includes(language)) {
-    throw new RangeError("Tarefa ou idioma de voz não suportado.");
-  }
-  return { quality: resolveVoiceQuality(quality, language).id, language };
+  if (action !== "tts") throw new RangeError("Tarefa de voz não suportada.");
+  resolveVoiceQuality(quality, language);
+  return CLONING_PROFILE;
 }
 
 // Advice only. Unknown or low hardware must never disable a model.

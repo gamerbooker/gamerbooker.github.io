@@ -1,6 +1,5 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.3";
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.3";
-import { resolveVoiceQuality } from "./quality-config.js?v=6.5.3";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.4";
+import { resolveStudioStartup, resolveVoiceQuality } from "./quality-config.js?v=6.5.4";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -75,7 +74,8 @@ async function fetchPinnedSource(path, expectedHash) {
 }
 
 async function boot() {
-  const startupLanguage = resolveStartupVoiceLanguage(window.location.search);
+  const startupLanguage = resolveStudioStartup(window.location.search);
+  const quality = resolveVoiceQuality("studio", startupLanguage.locale);
   const languageSelect = document.getElementById("language-select");
   if (languageSelect) languageSelect.value = startupLanguage.engineLanguage;
   const source = await fetchPinnedSource("onnx-streaming.js", MAIN_SHA256);
@@ -83,8 +83,8 @@ async function boot() {
   const workletProbeUrl = new URL("/local-voice/empty-worklet.js", window.location.origin).href;
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
-  inferenceWorkerUrl.searchParams.set("quality", new URLSearchParams(window.location.search).get("quality") === "studio" ? "studio" : "standard");
-  inferenceWorkerUrl.searchParams.set("release", "6.5.3");
+  inferenceWorkerUrl.searchParams.set("quality", quality.id);
+  inferenceWorkerUrl.searchParams.set("release", "6.5.4");
   const replacements = [
     [
       "this.handleVoiceEncoded(voiceName);",
@@ -160,7 +160,7 @@ async function boot() {
   try {
     await import(moduleUrl);
     if (!window.app) throw new Error("O runtime local não expôs a instância revisada.");
-    window.app.audioriaQuality = resolveVoiceQuality(new URLSearchParams(window.location.search).get("quality"), startupLanguage.locale).id;
+    window.app.audioriaQuality = quality.id;
     installLocalVoiceBridge(window.app);
   } finally {
     URL.revokeObjectURL(moduleUrl);

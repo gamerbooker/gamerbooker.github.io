@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>Audioria Local Voice</title>
     <link rel="stylesheet" href="./style.css" />
-    <script type="module" src="./gate.js?v=6.5.3"></script>
+    <script type="module" src="./gate.js?v=6.5.4"></script>
   </head>
   <body>
     <main class="engine-shell">
@@ -22,11 +22,7 @@
         <label class="voice-selector">
           <span class="voice-selector__label">Idioma</span>
           <select id="language-select" class="voice-selector__dropdown">
-            <option value="portuguese" selected>Português</option>
-            <option value="english_2026-04">English</option>
-            <option value="spanish">Español</option>
-            <option value="italian">Italiano</option>
-            <option value="german">Deutsch</option>
+            <option value="portuguese" selected>Português (Brasil) · Estúdio</option>
           </select>
         </label>
         <label class="voice-selector">
@@ -46,7 +42,7 @@
 
       <section class="input-section">
         <div class="textarea-wrap">
-          <textarea id="text-input" maxlength="10000" placeholder="Cole aqui o texto traduzido…" aria-label="Texto para sintetizar"></textarea>
+          <textarea id="text-input" lang="pt-BR" maxlength="10000" placeholder="Escreva em português…" aria-label="Texto para sintetizar"></textarea>
           <div class="textarea-meta"><span><span id="char-count">0</span> caracteres</span></div>
         </div>
         <div class="sample-texts" aria-label="Textos de exemplo">
@@ -90,7 +86,7 @@
 
       <footer>
         <p>Use somente sua voz ou uma voz com autorização específica.</p>
-        <p>Motor <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank" rel="noopener noreferrer">Pocket TTS</a> · export ONNX comunitário CC BY-NC 4.0 · somente preview gratuito e não comercial.</p>
+        <p>Motor <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank" rel="noopener noreferrer">Pocket TTS Estúdio</a> · português de 24 camadas · export ONNX CC BY 4.0 · edição gratuita experimental.</p>
       </footer>
     </main>
   </body>
