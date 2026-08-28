@@ -44,6 +44,17 @@ export function resolveVoiceQuality(value, language = "pt-BR") {
     ? VOICE_QUALITY_PROFILES.studio : VOICE_QUALITY_PROFILES.standard;
 }
 
+// The public cloning workflow has one model, independent of TTS preferences.
+export const CLONING_PROFILE = Object.freeze({ quality: "studio", language: "pt-BR" });
+
+export function resolveVoiceTaskProfile(action, quality, language) {
+  if (action === "clone") return CLONING_PROFILE;
+  if (action !== "tts" || !["pt-BR", "en-US", "es-ES"].includes(language)) {
+    throw new RangeError("Tarefa ou idioma de voz não suportado.");
+  }
+  return { quality: resolveVoiceQuality(quality, language).id, language };
+}
+
 // Advice only. Unknown or low hardware must never disable a model.
 export function isStudioVoiceRecommended(deviceMemoryGb, threads) {
   return Number.isFinite(deviceMemoryGb) && deviceMemoryGb >= 8

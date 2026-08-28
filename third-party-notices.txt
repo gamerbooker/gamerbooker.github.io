@@ -1,4 +1,4 @@
-AUDIORIA V0.10.2 — AVISOS DE TERCEIROS
+AUDIORIA V0.10.3 — AVISOS DE TERCEIROS
 
 OpenAI Whisper — MIT
 https://github.com/openai/whisper
@@ -12,6 +12,11 @@ https://github.com/huggingface/transformers.js
 
 ONNX Runtime Web — MIT
 https://github.com/microsoft/onnxruntime
+
+Lucide React 1.35.0 — ISC; ícones derivados de Feather sob MIT.
+Copyright (c) 2026 Lucide Icons and Contributors; Copyright (c) 2013-present Cole Bemis.
+https://github.com/lucide-icons/lucide/releases/tag/1.35.0
+Licença integral distribuída com os ícones: /licenses/LUCIDE-LICENSE.txt.
 
 fix-webm-duration 1.0.6 — MIT
 Copyright (c) 2018 Yury Sitnikov
@@ -33,7 +38,8 @@ gratuita e não está liberado como motor de um plano pago.
 https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
 https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
 
-Modo Estúdio opcional — Pocket TTS português 24l, export ONNX comunitário.
+Estúdio — Pocket TTS português 24l, export ONNX comunitário.
+Modelo exclusivo da clonagem; opção adicional no TTS.
 O diretório onnx desta revisão declara CC BY 4.0. Backbone INT8;
 codec, condicionador textual e flow FP32. Exportação de KevinAHM,
 a partir do Pocket TTS de Kyutai. Audioria adapta o runtime para

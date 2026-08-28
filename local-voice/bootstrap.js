@@ -1,6 +1,6 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.2";
-import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.2";
-import { resolveVoiceQuality } from "./quality-config.js?v=6.5.2";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.3";
+import { resolveStartupVoiceLanguage } from "./text-pipeline.js?v=6.5.3";
+import { resolveVoiceQuality } from "./quality-config.js?v=6.5.3";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -22,9 +22,9 @@ function reportParentBootFailure(code, error) {
     message: code === "engine_audio_failed"
       ? "O navegador não conseguiu iniciar o áudio. Recarregue a página ou experimente outro navegador atualizado."
       : code === "engine_worker_crashed"
-        ? "O navegador interrompeu o motor. Seu texto e sua amostra foram mantidos; tente novamente ou escolha Essencial."
+        ? "O navegador interrompeu o motor. Seu texto e sua amostra foram mantidos; feche outras abas e tente novamente."
         : /preparar o modelo|INITIALIZATION|memory|allocate/iu.test(String(error))
-          ? "Os arquivos chegaram, mas não foi possível preparar o modelo neste aparelho. Feche outras abas e tente novamente, ou escolha Essencial."
+          ? "Os arquivos chegaram, mas não foi possível preparar o modelo neste aparelho. Feche outras abas e tente novamente."
           : /download|fetch|conexão|baixar|network/iu.test(String(error))
             ? "Não foi possível concluir o download. Os arquivos completos foram mantidos; tente novamente para continuar."
             : "O motor não conseguiu iniciar. Seu texto e sua amostra foram mantidos; tente novamente.",
@@ -84,7 +84,7 @@ async function boot() {
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
   inferenceWorkerUrl.searchParams.set("quality", new URLSearchParams(window.location.search).get("quality") === "studio" ? "studio" : "standard");
-  inferenceWorkerUrl.searchParams.set("release", "6.5.2");
+  inferenceWorkerUrl.searchParams.set("release", "6.5.3");
   const replacements = [
     [
       "this.handleVoiceEncoded(voiceName);",

@@ -1,10 +1,10 @@
-import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.2";
-import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_PT_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.2";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.2";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.2";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.2";
-import { createModelAssetLoader } from "./model-download.js?v=6.5.2";
-import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.2";
+import { resolveStartupVoiceLanguage, splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.3";
+import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_PT_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.3";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.3";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.3";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.3";
+import { createModelAssetLoader } from "./model-download.js?v=6.5.3";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.3";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MODEL_REVISION = "d0c0c79b7712256a32d691c67f20b8ae2e020d00";
@@ -424,7 +424,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "audioria_runtime", version: "6.5.2" });
+  self.postMessage({ type: "audioria_runtime", version: "6.5.3" });
 }
 
 try {

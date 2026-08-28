@@ -6,8 +6,8 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.2";
-import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.2";
+} from "./text-pipeline.js?v=6.5.3";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.3";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -413,7 +413,7 @@ export function installLocalVoiceBridge(app) {
       const waiter = { resolve, reject, touch, requestId: task.requestId };
       voiceWaiters.add(waiter);
       return () => voiceWaiters.delete(waiter);
-    }, PREPARATION_TIMEOUT_MS, "A preparação ficou 15 minutos sem responder. Tente o modelo Essencial ou uma referência mais curta.");
+    }, PREPARATION_TIMEOUT_MS, "A preparação ficou 15 minutos sem responder. Feche outras abas ou use uma referência mais curta e tente novamente.");
     observeWorker();
     app.worker.postMessage({ type: "encode_voice", requestId: task.requestId, data: { audio: audioData } }, [audioData.buffer]);
     await encoded;

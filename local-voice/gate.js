@@ -55,7 +55,7 @@ if (window.parent === window) {
     document.body.dataset.consentGate = "confirmed";
     if (model) model.textContent = "Baixando modelos locais";
     try {
-      await import("./bootstrap.js?v=6.5.2");
+      await import("./bootstrap.js?v=6.5.3");
     } catch (error) {
       setBlocked(error instanceof Error ? error.message : "O motor local não pôde iniciar.");
       reportParentBootFailure("engine_boot_failed");

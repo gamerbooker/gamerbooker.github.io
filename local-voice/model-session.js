@@ -13,7 +13,7 @@ export async function loadModelSessions(files, createSession, { fetchModel = glo
       let session;
       try { session = await createSession(bytes); }
       catch (cause) {
-        const error = new Error("Os arquivos chegaram, mas este aparelho não conseguiu preparar o modelo. Feche outras abas e tente novamente, ou escolha Essencial.");
+        const error = new Error("Os arquivos chegaram, mas este aparelho não conseguiu preparar o modelo. Feche outras abas e tente novamente.");
         error.code = "MODEL_INITIALIZATION_FAILED";
         error.cause = cause;
         throw error;
