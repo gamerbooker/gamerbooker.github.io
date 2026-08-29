@@ -1,10 +1,10 @@
-import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.4";
-import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STUDIO_ASSET_BYTES, VOICE_QUALITY_PROFILES, resolveStudioStartup, studioVoiceUrl } from "./quality-config.js?v=6.5.4";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.4";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.4";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.4";
-import { createModelAssetLoader } from "./model-download.js?v=6.5.4";
-import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.4";
+import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.5";
+import { POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STUDIO_ASSET_BYTES, STUDIO_SAMPLER_DECODE_STEPS, STUDIO_TEMPERATURE, VOICE_QUALITY_PROFILES, resolveStudioStartup, studioVoiceUrl } from "./quality-config.js?v=6.5.5";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.5";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.5";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.5";
+import { createModelAssetLoader } from "./model-download.js?v=6.5.5";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.5";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const QUALITY = VOICE_QUALITY_PROFILES.studio;
@@ -161,7 +161,16 @@ function replaceExactlyOnce(source, search, replacement, integrationName) {
   return `${source.slice(0, first)}${replacement}${source.slice(first + search.length)}`;
 }
 
-function installDurationGuard(workerSource) {
+function installDurationGuard(workerSource, {
+  samplerDecodeSteps = 5,
+  temperature = 0.5,
+} = {}) {
+  if (!Number.isInteger(samplerDecodeSteps) || samplerDecodeSteps < 1 || samplerDecodeSteps > 8) {
+    throw new RangeError("A quantidade de etapas do Estúdio está fora do intervalo revisado.");
+  }
+  if (!Number.isFinite(temperature) || temperature < 0.1 || temperature > 1) {
+    throw new RangeError("A temperatura do Estúdio está fora do intervalo revisado.");
+  }
   // Pocket emits 1,920 samples per autoregressive frame at 24 kHz (80 ms).
   // A fixed 500-frame ceiling therefore permits 40 seconds *per internal
   // sentence*, even for a handful of characters. Keep generous headroom for
@@ -187,6 +196,12 @@ function installDurationGuard(workerSource) {
             )
         );`,
     "do limite proporcional ao texto",
+  );
+  source = replaceExactlyOnce(
+    source,
+    "const LSD_STEPS = 1;",
+    `const LSD_STEPS = ${samplerDecodeSteps};`,
+    "da decodificação Estúdio Max em cinco etapas",
   );
   // Match manifest fills for every dtype, including boolean first-call flags.
   // This is a state-initialization fix, not a guarantee of word completeness.
@@ -302,13 +317,14 @@ function installDurationGuard(workerSource) {
         : bundleMetadata.predefined_voices?.includes("alba") ? "alba" : null;`,
     "da voz nativa padrão em português",
   );
-  // Pocket v3 recommends 0.3 for English; Portuguese keeps its native 0.7.
-  // Do not silently transfer English tuning to a different-language checkpoint.
+  // Pocket's documented high-quality recipe combines five flow-decoder passes
+  // with temperature 0.5. This route is PT-BR-only and intentionally favors
+  // fidelity and generation stability over speed.
   source = replaceExactlyOnce(
     source,
     "            const temperature = 0.7;",
-    '            const temperature = currentLanguage.startsWith("english") ? 0.3 : 0.7;',
-    "da temperatura específica por idioma",
+    `            const temperature = ${temperature};`,
+    "da temperatura Estúdio Max",
   );
   return source;
 }
@@ -359,7 +375,10 @@ async function boot() {
     throw new Error("O runtime não contém a integração SentencePiece revisada.");
   }
 
-  let source = installDurationGuard(workerSource);
+  let source = installDurationGuard(workerSource, {
+    samplerDecodeSteps: STUDIO_SAMPLER_DECODE_STEPS,
+    temperature: STUDIO_TEMPERATURE,
+  });
   source = installReferenceRuntime(source);
   if (QUALITY.id === "studio") source = installStudioVoiceRuntime(source);
   source = installModelSessionRuntime(source);
@@ -409,7 +428,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "audioria_runtime", version: "6.5.4" });
+  self.postMessage({ type: "audioria_runtime", version: "6.5.5" });
 }
 
 try {
@@ -418,6 +437,6 @@ try {
   self.removeEventListener("message", capturePendingMessage);
   self.postMessage({
     type: "error",
-    error: `AUDIORIA_BOOT_640: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
+    error: `AUDIORIA_BOOT_655: ${error instanceof Error ? error.message : "Falha ao iniciar o motor local"}`,
   });
 }

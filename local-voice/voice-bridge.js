@@ -6,8 +6,8 @@ import {
   resolveVoiceLanguage,
   splitVoiceText,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.4";
-import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.4";
+} from "./text-pipeline.js?v=6.5.5";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.5";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;

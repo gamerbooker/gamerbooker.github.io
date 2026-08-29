@@ -1,4 +1,4 @@
-AUDIORIA V0.10.4 — AVISOS DE TERCEIROS
+AUDIORIA V0.10.5 — AVISOS DE TERCEIROS
 
 OpenAI Whisper — MIT
 https://github.com/openai/whisper
@@ -33,17 +33,19 @@ https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d69
 
 Pocket TTS Web (artefatos ONNX comunitários históricos do Essencial) — separadamente, o arquivo
 onnx/ONNX-LICENSE do snapshot usado declara CC BY-NC 4.0; o catálogo agregado
-também inclui vozes CC BY-NC. O perfil não é selecionável na release 0.10.4;
+também inclui vozes CC BY-NC. O perfil não é selecionável na release 0.10.5;
 o aviso permanece para código publicado em versões anteriores e retido para abas abertas.
 https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
 https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
 
-Estúdio — Pocket TTS português 24l, export ONNX comunitário.
+Estúdio Max — Pocket TTS português 24l, export ONNX comunitário.
 Único modelo público de clonagem e Texto em voz nesta release.
 O diretório onnx desta revisão declara CC BY 4.0. Backbone INT8;
 codec, condicionador textual e flow FP32. Exportação de KevinAHM,
 a partir do Pocket TTS de Kyutai. Audioria adapta o runtime para
 carregamento sequencial, referências safetensors e estado limitado em memória.
+A síntese usa a configuração de alta qualidade documentada no Pocket TTS:
+cinco etapas do sampler e temperatura 0,5, com maior custo de processamento.
 https://huggingface.co/KevinAHM/pocket-tts-onnx/tree/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/portuguese_24l
 https://huggingface.co/KevinAHM/pocket-tts-onnx/blob/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE
 Configuração nativa e referência Rafael:

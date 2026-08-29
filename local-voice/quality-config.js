@@ -1,10 +1,17 @@
 // Reviewed, immutable model profiles. No model is fetched by importing this file.
 export const POCKET_STUDIO_REVISION = "58a6d00cf13d239b6748cb0769f35c580a8f606c";
 export const POCKET_STUDIO_VOICES_REVISION = "e81d79e8194ad4c7ce879c87a4258ef20cbf2487";
+// Pocket's current high-quality recipe: five flow-decoder passes at a lower
+// temperature. The weights stay identical; this deliberately spends more
+// compute to reduce sampling roughness and improve reconstruction quality.
+export const STUDIO_SAMPLER_DECODE_STEPS = 5;
+export const STUDIO_TEMPERATURE = 0.5;
 
 export const VOICE_QUALITY_PROFILES = Object.freeze({
   studio: Object.freeze({
     id: "studio", layers: 24, downloadBytes: 466_755_162,
+    samplerDecodeSteps: STUDIO_SAMPLER_DECODE_STEPS,
+    temperature: STUDIO_TEMPERATURE,
     recommendedDeviceMemoryGb: 8, recommendedThreads: 8,
   }),
 });
