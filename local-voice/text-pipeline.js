@@ -73,7 +73,10 @@ const REFERENCE_MINIMUM_SECONDS = 1;
 const REFERENCE_MAXIMUM_SECONDS = 30;
 const MASTERING_HIGH_PASS_HZ = 48;
 const MASTERING_PEAK_CEILING = 0.965;
-const MASTERING_MAXIMUM_GAIN_DB = 2.5;
+// Pocket's local decoder often returns conservative peaks (around -13 dBFS).
+// Allow safe makeup gain so short cloned phrases are clearly audible while the
+// peak ceiling and soft knee still prevent clipping.
+const MASTERING_MAXIMUM_GAIN_DB = 12;
 const PROSODIC_PAUSES = Object.freeze({
   soft: 85,
   intermediate: 130,
@@ -552,7 +555,7 @@ export function prepareVoiceReferencePcm(audio, sampleRate, {
  *
  * This deliberately avoids denoising or spectral reconstruction, which can
  * change a cloned identity. It only sanitizes invalid PCM, removes DC/sub-bass,
- * applies at most +2.5 dB of whole-chunk gain and uses a soft peak knee.
+ * applies at most +12 dB of whole-chunk makeup gain and uses a soft peak knee.
  */
 export function masterVoicePcm(audio, sampleRate, {
   highPassHz = MASTERING_HIGH_PASS_HZ,
@@ -569,8 +572,8 @@ export function masterVoicePcm(audio, sampleRate, {
   if (!Number.isFinite(peakCeiling) || peakCeiling < 0.5 || peakCeiling >= 1) {
     throw new RangeError("peakCeiling deve estar entre 0.5 e 1.");
   }
-  if (!Number.isFinite(maximumGainDb) || maximumGainDb < 0 || maximumGainDb > 6) {
-    throw new RangeError("maximumGainDb deve estar entre 0 e 6 dB.");
+  if (!Number.isFinite(maximumGainDb) || maximumGainDb < 0 || maximumGainDb > 12) {
+    throw new RangeError("maximumGainDb deve estar entre 0 e 12 dB.");
   }
 
   const output = new Float32Array(audio.length);
