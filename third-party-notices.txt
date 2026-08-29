@@ -1,4 +1,4 @@
-AUDIORIA V0.10.5 — AVISOS DE TERCEIROS
+AUDIORIA V0.10.6 — AVISOS DE TERCEIROS
 
 OpenAI Whisper — MIT
 https://github.com/openai/whisper
@@ -33,7 +33,7 @@ https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d69
 
 Pocket TTS Web (artefatos ONNX comunitários históricos do Essencial) — separadamente, o arquivo
 onnx/ONNX-LICENSE do snapshot usado declara CC BY-NC 4.0; o catálogo agregado
-também inclui vozes CC BY-NC. O perfil não é selecionável na release 0.10.5;
+também inclui vozes CC BY-NC. O perfil não é selecionável na release 0.10.6;
 o aviso permanece para código publicado em versões anteriores e retido para abas abertas.
 https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
 https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
