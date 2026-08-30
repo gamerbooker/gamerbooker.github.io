@@ -1,5 +1,5 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.8";
-import { resolveStudioStartup, resolveVoiceQuality } from "./quality-config.js?v=6.5.8";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.9";
+import { resolveStudioStartup, resolveVoiceQuality } from "./quality-config.js?v=6.5.9";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -84,7 +84,7 @@ async function boot() {
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
   inferenceWorkerUrl.searchParams.set("quality", quality.id);
-  inferenceWorkerUrl.searchParams.set("release", "6.5.8");
+  inferenceWorkerUrl.searchParams.set("release", "6.5.9");
   const replacements = [
     [
       "this.handleVoiceEncoded(voiceName);",

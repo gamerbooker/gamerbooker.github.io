@@ -7,8 +7,8 @@ import {
   splitVoiceText,
   stabilizeVoiceProsody,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.8";
-import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.8";
+} from "./text-pipeline.js?v=6.5.9";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.9";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -52,10 +52,14 @@ export function maximumVoiceSamplesForText(value, sampleRate) {
 
 export function ensureTtsBoundary(value) {
   const text = String(value ?? "").trim();
-  // A comma/colon/semicolon is already an intentional prosodic boundary.
-  // Appending a full stop produced invalid prompts such as `texto,.` and
-  // `atenção:.`, which can destabilize intonation in Pocket TTS.
-  return /[,.;:!?…-](?:["')\]]*)$/u.test(text) ? text : `${text}.`;
+  // A final comma/colon/semicolon/dash announces continuation, so Pocket can
+  // keep speaking past the requested phrase or accept EOS mid-syllable. Turn
+  // only that synthesis copy into a strong stop; normalizedText and chunk
+  // metadata retain the user's exact punctuation.
+  if (/[.;:,-](?:["')\]]*)$/u.test(text) && !/[.!?…](?:["')\]]*)$/u.test(text)) {
+    return text.replace(/[,;:-](["')\]]*)$/u, ".$1");
+  }
+  return /[.!?…](?:["')\]]*)$/u.test(text) ? text : `${text}.`;
 }
 
 function hasControlCodePoint(value) {

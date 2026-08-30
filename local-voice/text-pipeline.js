@@ -67,6 +67,13 @@ const TRIM_TRAILING_PADDING_MILLISECONDS = 96;
 // noise floor before speech begins.
 const INITIAL_HEAD_MILLISECONDS = 220;
 const TERMINAL_TAIL_MILLISECONDS = 240;
+// Extra decoder drain frames are essential for a complete final syllable, but
+// models can turn their last frames into exact/near-digital silence. Cap only
+// that proven silence population; a 120 ms guard remains after the last sample
+// above -72 dBFS, well below quiet Portuguese /s/, /f/ and breath energy.
+const EXCESS_TAIL_SILENCE_THRESHOLD_DBFS = -72;
+const EXCESS_TAIL_MINIMUM_MILLISECONDS = 240;
+const EXCESS_TAIL_RETAINED_MILLISECONDS = 120;
 const REFERENCE_SILENCE_THRESHOLD_DBFS = -62;
 const REFERENCE_EDGE_PADDING_MILLISECONDS = 120;
 const REFERENCE_MINIMUM_SECONDS = 1;
@@ -671,6 +678,24 @@ function measureInactiveEdges(audio, threshold) {
   };
 }
 
+function capExcessDecoderSilence(audio, sampleRate) {
+  const threshold = 10 ** (EXCESS_TAIL_SILENCE_THRESHOLD_DBFS / 20);
+  let lastAudible = audio.length - 1;
+  while (lastAudible >= 0) {
+    const sample = audio[lastAudible];
+    if (Number.isFinite(sample) && Math.abs(sample) > threshold) break;
+    lastAudible -= 1;
+  }
+  // An all-quiet chunk is rejected by the caller. Keeping it unchanged here
+  // avoids manufacturing a false active boundary from numerical noise.
+  if (lastAudible < 0) return audio;
+  const trailingSamples = audio.length - 1 - lastAudible;
+  const minimumSamples = Math.round(sampleRate * EXCESS_TAIL_MINIMUM_MILLISECONDS / 1_000);
+  if (trailingSamples < minimumSamples) return audio;
+  const retainedSamples = Math.round(sampleRate * EXCESS_TAIL_RETAINED_MILLISECONDS / 1_000);
+  return audio.subarray(0, Math.min(audio.length, lastAudible + 1 + retainedSamples));
+}
+
 function applyConstantPowerEdgeFades(audio, fadeSamples, inactiveEdges, { fadeIn, fadeOut }) {
   const output = new Float32Array(audio);
 
@@ -699,7 +724,6 @@ function applyConstantPowerEdgeFades(audio, fadeSamples, inactiveEdges, { fadeIn
 }
 
 export function stitchVoiceAudio(renderedChunks, sampleRate, {
-  thresholdDbfs = SILENCE_THRESHOLD_DBFS,
   crossfadeMilliseconds = CROSSFADE_MILLISECONDS,
 } = {}) {
   if (!Array.isArray(renderedChunks) || !renderedChunks.length) {
@@ -712,25 +736,24 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
     throw new RangeError("crossfadeMilliseconds deve estar entre 0 e 50 ms.");
   }
 
-  const fadeThreshold = 10 ** (thresholdDbfs / 20);
   const prepared = renderedChunks.flatMap((chunk, originalIndex) => {
     const audio = chunk instanceof Float32Array ? chunk : chunk?.audio;
     if (!(audio instanceof Float32Array)) throw new TypeError("Cada chunk precisa conter áudio Float32Array.");
     const metadata = chunk instanceof Float32Array
       ? describeVoiceChunk("trecho", { index: originalIndex })
       : chunk.metadata ?? describeVoiceChunk("trecho", { index: originalIndex });
-    // A quiet /s/, /f/ or breath can precede the first voiced sample by more
-    // than any fixed gate margin. Never gate a short generated utterance:
-    // preserve its whole waveform, sanitizing non-finite values in mastering.
-    // The gate remains useful for long chunks with excessive idle padding.
-    const shortUtterance = audio.length <= sampleRate * 8;
+    // A quiet /s/, /f/ or breath can precede or follow voiced samples by more
+    // than any fixed gate margin. Never amplitude-gate generated speech,
+    // regardless of duration. The decoder duration guard handles repetition;
+    // capExcessDecoderSilence removes only a proven near-digital tail.
     const hasSignal = audio.some((sample) => Number.isFinite(sample) && sample !== 0);
-    const trimmed = shortUtterance
-      ? (hasSignal ? audio : new Float32Array(0))
-      : trimFloat32Silence(audio, sampleRate, { thresholdDbfs });
-    return trimmed.length ? [{
-      audio: masterVoicePcm(trimmed, sampleRate),
-      inactiveEdges: measureInactiveEdges(trimmed, shortUtterance ? 0 : fadeThreshold),
+    if (!hasSignal) return [];
+    const drained = capExcessDecoderSilence(audio, sampleRate);
+    return drained.length ? [{
+      audio: masterVoicePcm(drained, sampleRate),
+      // Only literal digital zero is safe for edge fades/pause accounting.
+      // Near-zero is still data and may be the attack/release of a phoneme.
+      inactiveEdges: measureInactiveEdges(drained, 0),
       metadata,
     }] : [];
   });
@@ -777,6 +800,9 @@ export const LOCAL_VOICE_TEXT_LIMITS = Object.freeze({
   trimTrailingPaddingMilliseconds: TRIM_TRAILING_PADDING_MILLISECONDS,
   initialHeadMilliseconds: INITIAL_HEAD_MILLISECONDS,
   terminalTailMilliseconds: TERMINAL_TAIL_MILLISECONDS,
+  excessTailSilenceThresholdDbfs: EXCESS_TAIL_SILENCE_THRESHOLD_DBFS,
+  excessTailMinimumMilliseconds: EXCESS_TAIL_MINIMUM_MILLISECONDS,
+  excessTailRetainedMilliseconds: EXCESS_TAIL_RETAINED_MILLISECONDS,
   masteringHighPassHz: MASTERING_HIGH_PASS_HZ,
   masteringPeakCeiling: MASTERING_PEAK_CEILING,
   masteringMaximumGainDb: MASTERING_MAXIMUM_GAIN_DB,

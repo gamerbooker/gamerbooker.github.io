@@ -1,10 +1,10 @@
-import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.8";
-import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.8";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.8";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.8";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.8";
-import { createModelAssetLoader } from "./model-download.js?v=6.5.8";
-import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.8";
+import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.9";
+import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.9";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.9";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.9";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.9";
+import { createModelAssetLoader } from "./model-download.js?v=6.5.9";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.9";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const STARTUP = resolveStudioStartup(self.location.search);
@@ -275,15 +275,32 @@ function installDurationGuard(workerSource, {
     "            const isEos = eosLogit > -4.0 && step >= audioriaMinimumFrames;",
     "do piso anti-EOS precoce",
   );
+  // A single noisy EOS logit used to start an irrevocable countdown. Require
+  // two adjacent 80 ms frames before accepting EOS, so a transient spike in a
+  // stressed Portuguese vowel cannot truncate the following syllable.
+  source = replaceExactlyOnce(
+    source,
+    "        let eosStep = null;",
+    `        let eosStep = null;
+        let audioriaConsecutiveEosFrames = 0;`,
+    "do estado de confirmação de EOS",
+  );
+  source = replaceExactlyOnce(
+    source,
+    `            if (isEos && eosStep == null) {
+                eosStep = step;
+            }
+            const shouldStop = eosStep != null && step >= eosStep + framesAfterEos;`,
+    `            if (eosStep == null) {
+                audioriaConsecutiveEosFrames = isEos ? audioriaConsecutiveEosFrames + 1 : 0;
+                if (audioriaConsecutiveEosFrames >= 2) eosStep = step - 1;
+            }
+            const shouldStop = eosStep != null && step >= eosStep + audioriaFramesAfterEos;`,
+    "da confirmação estável de EOS e drenagem do decoder",
+  );
   // Match the current native Pocket pipeline: prepare EACH internal sentence.
   // Splitting trims short-input padding, and the final sentence can be much
   // shorter than the outer request. Its decoder tail must follow its own text.
-  source = replaceExactlyOnce(
-    source,
-    "            const shouldStop = eosStep != null && step >= eosStep + framesAfterEos;",
-    "            const shouldStop = eosStep != null && step >= eosStep + audioriaFramesAfterEos;",
-    "da preparação e cauda por frase",
-  );
   source = replaceExactlyOnce(
     source,
     "        for (let step = 0; step < MAX_FRAMES; step++) {",
@@ -303,14 +320,14 @@ function installDurationGuard(workerSource, {
     "da falha segura após o limite",
   );
   // The reviewed upstream runtime lets bundle metadata overwrite its special
-  // short-prompt tail. Portuguese four-word prompts can therefore stop on the
-  // release of the final consonant. Preserve six 80 ms decoder frames after
-  // EOS for <=4 words (two for longer speech) and treat metadata as a minimum,
-  // never as permission to shorten that acoustic tail.
+  // short-prompt tail. The former long-prompt value was only two 80 ms frames;
+  // recorded evidence still had -30 to -40 dBFS at that boundary. Drain eight
+  // frames for very short prompts and six for all others. The stitcher later
+  // removes only a proven near-digital-silence excess, never active phonemes.
   source = replaceExactlyOnce(
     source,
     "    let framesAfterEos = wordCount <= 4 ? 3 : 1;",
-    "    let framesAfterEos = wordCount <= 4 ? 6 : 2;",
+    "    let framesAfterEos = wordCount <= 4 ? 8 : 6;",
     "da cauda acústica para texto curto",
   );
   source = replaceExactlyOnce(
@@ -441,7 +458,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "audioria_runtime", version: "6.5.8" });
+  self.postMessage({ type: "audioria_runtime", version: "6.5.9" });
 }
 
 try {
