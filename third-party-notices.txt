@@ -1,4 +1,4 @@
-AUDIORIA V0.10.9 — AVISOS DE TERCEIROS
+AUDIORIA V0.11.0 — AVISOS DE TERCEIROS
 
 OpenAI Whisper — MIT
 https://github.com/openai/whisper

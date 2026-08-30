@@ -1,4 +1,4 @@
-import { STUDIO_MODEL_FILES, STUDIO_VOICES } from "./quality-config.js?v=6.5.9";
+import { STUDIO_MODEL_FILES, STUDIO_VOICES } from "./quality-config.js?v=6.6.0";
 
 export const STUDIO_VOICE_LOADER_KEY = "__audioria_studio_voice_650";
 

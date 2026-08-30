@@ -103,6 +103,22 @@ export function createModelAssetLoader({
       const cached = cache && await bounded(cache.match(cacheRequest), limits.cacheMs, signal);
       if (cached) {
         try {
+          // Files written by this loader carry an explicit completion marker
+          // and their immutable manifest size. Returning that Response avoids
+          // materializing the largest graph as Blob -> Response -> ArrayBuffer
+          // on every warm start (hundreds of megabytes on the Studio model).
+          // Legacy/unmarked entries still take the deep validation path below.
+          const cachedLength = Number(cached.headers.get("content-length"));
+          const isValidatedCompleteAsset = cached.status === 200
+            && Boolean(cached.body)
+            && expected > 0
+            && cached.headers.get("x-audioria-complete") === "1"
+            && Number.isSafeInteger(cachedLength)
+            && cachedLength === expected;
+          if (isValidatedCompleteAsset) {
+            report({ url, loadedBytes: expected, totalBytes: expected, phase: "cached" });
+            return cached;
+          }
           const blob = await readCompleteBlob(cached, { url, expectedBytes: expected, phase: "cache", idleMs: limits.cacheMs, signal, report });
           report({ url, loadedBytes: blob.size, totalBytes: blob.size, phase: "cached" });
           return assetResponse(blob);

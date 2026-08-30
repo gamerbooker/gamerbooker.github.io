@@ -723,6 +723,30 @@ function applyConstantPowerEdgeFades(audio, fadeSamples, inactiveEdges, { fadeIn
   return output;
 }
 
+function hasUsableGeneratedSignal(audio, sampleRate) {
+  let finite = 0;
+  let active = 0;
+  let peak = 0;
+  let sumSquares = 0;
+  const activityFloor = 10 ** (-78 / 20);
+  for (const sample of audio) {
+    if (!Number.isFinite(sample)) continue;
+    finite += 1;
+    const absolute = Math.abs(sample);
+    peak = Math.max(peak, absolute);
+    sumSquares += sample * sample;
+    if (absolute >= activityFloor) active += 1;
+  }
+  const rms = Math.sqrt(sumSquares / Math.max(1, finite));
+  // Reject digital dust/invalid decoder output, but keep soft fricatives near
+  // -60 dBFS. A valid chunk needs only 20 ms of measurable activity because
+  // very short Portuguese prompts can contain quiet consonants at the edges.
+  return finite >= audio.length * 0.99
+    && peak >= 10 ** (-66 / 20)
+    && rms >= 10 ** (-76 / 20)
+    && active >= Math.min(audio.length, Math.max(32, Math.round(sampleRate * 0.02)));
+}
+
 export function stitchVoiceAudio(renderedChunks, sampleRate, {
   crossfadeMilliseconds = CROSSFADE_MILLISECONDS,
 } = {}) {
@@ -746,8 +770,7 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
     // than any fixed gate margin. Never amplitude-gate generated speech,
     // regardless of duration. The decoder duration guard handles repetition;
     // capExcessDecoderSilence removes only a proven near-digital tail.
-    const hasSignal = audio.some((sample) => Number.isFinite(sample) && sample !== 0);
-    if (!hasSignal) return [];
+    if (!hasUsableGeneratedSignal(audio, sampleRate)) return [];
     const drained = capExcessDecoderSilence(audio, sampleRate);
     return drained.length ? [{
       audio: masterVoicePcm(drained, sampleRate),
@@ -757,7 +780,9 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
       metadata,
     }] : [];
   });
-  if (!prepared.length) return new Float32Array(0);
+  // Never publish a partial sentence when one generated chunk is silent or
+  // invalid. The caller will surface a retry instead of presenting "ready".
+  if (!prepared.length || prepared.length !== renderedChunks.length) return new Float32Array(0);
 
   const fadeSamples = Math.max(0, Math.round(sampleRate * crossfadeMilliseconds / 1000));
   const pauses = prepared.slice(0, -1).map(({ metadata, inactiveEdges }) => {

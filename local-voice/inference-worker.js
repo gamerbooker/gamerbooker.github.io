@@ -1,10 +1,10 @@
-import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.5.9";
-import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.5.9";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.5.9";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.5.9";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.5.9";
-import { createModelAssetLoader } from "./model-download.js?v=6.5.9";
-import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.5.9";
+import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.6.0";
+import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.6.0";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.6.0";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.6.0";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.6.0";
+import { createModelAssetLoader } from "./model-download.js?v=6.6.0";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.6.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const STARTUP = resolveStudioStartup(self.location.search);
@@ -205,7 +205,7 @@ function installDurationGuard(workerSource, {
             Math.max(
                 6,
                 Math.ceil(audioriaWordCount * 3.5),
-                Math.ceil(audioriaCodePoints / 3)
+                Math.ceil(audioriaCodePoints * 0.45)
             )
         );`,
     "do limite proporcional ao texto",
@@ -458,7 +458,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "audioria_runtime", version: "6.5.9" });
+  self.postMessage({ type: "audioria_runtime", version: "6.6.0" });
 }
 
 try {
