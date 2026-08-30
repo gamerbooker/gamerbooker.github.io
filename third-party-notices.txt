@@ -1,4 +1,4 @@
-AUDIORIA V0.10.6 — AVISOS DE TERCEIROS
+AUDIORIA V0.10.8 — AVISOS DE TERCEIROS
 
 OpenAI Whisper — MIT
 https://github.com/openai/whisper
@@ -31,15 +31,16 @@ Pocket TTS Web — código da integração no navegador sob Apache License 2.0.
 Uma cópia integral está em /local-voice/CODE-LICENSE.txt.
 https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/CODE-LICENSE
 
-Pocket TTS Web (artefatos ONNX comunitários históricos do Essencial) — separadamente, o arquivo
+Pocket Celular (artefatos ONNX comunitários) — separadamente, o arquivo
 onnx/ONNX-LICENSE do snapshot usado declara CC BY-NC 4.0; o catálogo agregado
-também inclui vozes CC BY-NC. O perfil não é selecionável na release 0.10.6;
-o aviso permanece para código publicado em versões anteriores e retido para abas abertas.
+também inclui vozes CC BY-NC. Este perfil é disponibilizado somente na edição
+gratuita experimental; não está qualificado para monetização sem substituir/auditar
+os artefatos e vozes. Usa o snapshot revisionado abaixo, 6 camadas e grafos INT8.
 https://huggingface.co/spaces/KevinAHM/pocket-tts-web/blob/d0c0c79b7712256a32d691c67f20b8ae2e020d00/onnx/ONNX-LICENSE
 https://huggingface.co/kyutai/tts-voices/blob/323332d33f997de8394f24a193e1a76df720e01a/README.md
 
 Estúdio Max — Pocket TTS português 24l, export ONNX comunitário.
-Único modelo público de clonagem e Texto em voz nesta release.
+Perfil público de maior fidelidade para clonagem e Texto em voz nesta release.
 O diretório onnx desta revisão declara CC BY 4.0. Backbone INT8;
 codec, condicionador textual e flow FP32. Exportação de KevinAHM,
 a partir do Pocket TTS de Kyutai. Audioria adapta o runtime para

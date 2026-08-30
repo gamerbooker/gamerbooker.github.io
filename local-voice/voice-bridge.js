@@ -5,9 +5,10 @@ import {
   prepareVoiceReferencePcm,
   resolveVoiceLanguage,
   splitVoiceText,
+  stabilizeVoiceProsody,
   stitchVoiceAudio,
-} from "./text-pipeline.js?v=6.5.6";
-import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.6";
+} from "./text-pipeline.js?v=6.5.8";
+import { VOICE_PROGRESS, VOICE_TIMEOUTS } from "./progress.js?v=6.5.8";
 
 const PROTOCOL_VERSION = 1;
 const MAX_REFERENCE_BYTES = 64 * 1024 * 1024;
@@ -49,9 +50,12 @@ export function maximumVoiceSamplesForText(value, sampleRate) {
   return Math.ceil(seconds * sampleRate);
 }
 
-function ensureTtsBoundary(value) {
+export function ensureTtsBoundary(value) {
   const text = String(value ?? "").trim();
-  return /[.!?…](?:["')\]]*)$/u.test(text) ? text : `${text}.`;
+  // A comma/colon/semicolon is already an intentional prosodic boundary.
+  // Appending a full stop produced invalid prompts such as `texto,.` and
+  // `atenção:.`, which can destabilize intonation in Pocket TTS.
+  return /[,.;:!?…-](?:["')\]]*)$/u.test(text) ? text : `${text}.`;
 }
 
 function hasControlCodePoint(value) {
@@ -350,8 +354,8 @@ export function installLocalVoiceBridge(app) {
 
   const ensureLanguage = async (language) => {
     const resolved = resolveVoiceLanguage(language, { strict: true });
-    if (app.audioriaQuality !== "studio" || resolved.locale !== "pt-BR") {
-      throw new RangeError("Esta edição usa somente Estúdio em português do Brasil. Seu texto foi mantido.");
+    if (!["standard", "studio"].includes(app.audioriaQuality) || resolved.locale !== "pt-BR") {
+      throw new RangeError("Esta edição usa somente Pocket em português do Brasil. Seu texto foi mantido.");
     }
     await ensureEngineReady();
     if (app.currentLanguage === resolved.engineLanguage && !app.isVoicePreparing) return resolved;
@@ -590,7 +594,7 @@ export function installLocalVoiceBridge(app) {
     // Autoregressive speech models may continue until their token ceiling when
     // a transcript fragment has no explicit stop. Add a synthesis-only full
     // stop; the normalized user text is restored unchanged after the batch.
-    const synthesisText = ensureTtsBoundary(text);
+    const synthesisText = ensureTtsBoundary(stabilizeVoiceProsody(text));
     batch.currentChunkIndex = batch.nextIndex;
     batch.nextIndex += 1;
     app.elements.textInput.value = synthesisText;

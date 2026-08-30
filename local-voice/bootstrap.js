@@ -1,5 +1,5 @@
-import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.6";
-import { resolveStudioStartup, resolveVoiceQuality } from "./quality-config.js?v=6.5.6";
+import { installLocalVoiceBridge } from "./voice-bridge.js?v=6.5.8";
+import { resolveStudioStartup, resolveVoiceQuality } from "./quality-config.js?v=6.5.8";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const MAIN_SHA256 = "39ef54d15bc41344c39e08468bac86a32a07d8f720e20e592b44ceeb36ac501b";
@@ -75,7 +75,7 @@ async function fetchPinnedSource(path, expectedHash) {
 
 async function boot() {
   const startupLanguage = resolveStudioStartup(window.location.search);
-  const quality = resolveVoiceQuality("studio", startupLanguage.locale);
+  const quality = resolveVoiceQuality(new URLSearchParams(window.location.search).get("quality"), startupLanguage.locale);
   const languageSelect = document.getElementById("language-select");
   if (languageSelect) languageSelect.value = startupLanguage.engineLanguage;
   const source = await fetchPinnedSource("onnx-streaming.js", MAIN_SHA256);
@@ -84,7 +84,7 @@ async function boot() {
   const inferenceWorkerUrl = new URL("/local-voice/inference-worker.js", window.location.origin);
   inferenceWorkerUrl.searchParams.set("language", startupLanguage.locale);
   inferenceWorkerUrl.searchParams.set("quality", quality.id);
-  inferenceWorkerUrl.searchParams.set("release", "6.5.6");
+  inferenceWorkerUrl.searchParams.set("release", "6.5.8");
   const replacements = [
     [
       "this.handleVoiceEncoded(voiceName);",

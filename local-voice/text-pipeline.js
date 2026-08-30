@@ -99,6 +99,7 @@ const EMOJI_RESIDUE = Object.freeze([
 // from being mistaken for an HTML tag while still removing common markup.
 const HTML_TAG = /<\/?(?:a|abbr|article|aside|b|blockquote|body|br|button|code|div|em|figcaption|figure|footer|h[1-6]|head|header|hr|html|i|img|label|li|link|main|mark|meta|nav|ol|p|pre|script|section|small|span|strong|style|sub|sup|table|tbody|td|th|thead|title|tr|u|ul)(?:\s+[^<>\n]{0,220})?\s*\/?>/giu;
 const HTML_COMMENT = /<!--[\s\S]*?-->/gu;
+const PORTUGUESE_ABBREVIATION = /(?:\b(?:sr|sra|srta|dr|dra|prof|profa|eng|arq|av|art|pág|núm|nº|etc)\.|\b\p{Lu}\.)$/iu;
 const HTML_ENTITIES = Object.freeze({
   amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
   hellip: "…", ndash: "–", mdash: "—",
@@ -253,17 +254,47 @@ export function normalizeVoiceText(input, language = "portuguese") {
   return value;
 }
 
+/**
+ * Present one unambiguous prosodic mark at each boundary to the speech model.
+ * Decorative punctuation runs can become extra autoregressive tokens and make
+ * a small TTS model stutter or stop early. This synthesis-only view preserves
+ * every letter, accent and word while collapsing only redundant punctuation.
+ */
+export function stabilizeVoiceProsody(input) {
+  if (typeof input !== "string") throw new TypeError("O texto de prosódia deve ser uma string.");
+  const value = input.normalize("NFC")
+    .replace(/\.{2,}/gu, ".")
+    .replace(/([!?])(?:\s*[!?])+/gu, "$1")
+    .replace(/([,;:])(?:\s*[,;:])+/gu, "$1")
+    .replace(/([,;:.!?])(?=[\p{L}\p{N}])/gu, "$1 ")
+    .replace(HORIZONTAL_SPACE, " ")
+    .trim();
+  if (!/[\p{L}\p{N}]/u.test(value)) throw new RangeError("Digite palavras para gerar voz, não apenas pontuação.");
+  return value;
+}
+
 function segmentSentences(value, locale) {
   const paragraphs = value.split(/\n{2,}/u).map((paragraph) => paragraph.trim()).filter(Boolean);
   const result = [];
   for (const [paragraphIndex, paragraph] of paragraphs.entries()) {
-    const sentences = typeof Intl?.Segmenter === "function"
+    const segmented = typeof Intl?.Segmenter === "function"
       ? Array.from(
         new Intl.Segmenter(locale, { granularity: "sentence" }).segment(paragraph),
         ({ segment }) => segment.trim(),
       ).filter(Boolean)
       : paragraph.match(/[^.!?\n]+(?:[.!?]+(?=\s|$)|\n+|$)/gu)?.map((segment) => segment.trim()).filter(Boolean)
         ?? [paragraph];
+    // Intl.Segmenter may see `Dr.` or `Sra.` as a sentence. Merge that boundary
+    // before token budgeting so Portuguese titles keep their following name.
+    const sentences = [];
+    for (const sentence of segmented) {
+      const previous = sentences.at(-1);
+      if (locale.toLowerCase().startsWith("pt") && previous && PORTUGUESE_ABBREVIATION.test(previous)) {
+        sentences[sentences.length - 1] = `${previous} ${sentence}`;
+      } else {
+        sentences.push(sentence);
+      }
+    }
     sentences.forEach((text, sentenceIndex) => {
       result.push({
         text,
@@ -706,9 +737,12 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
   if (!prepared.length) return new Float32Array(0);
 
   const fadeSamples = Math.max(0, Math.round(sampleRate * crossfadeMilliseconds / 1000));
-  const pauses = prepared.slice(0, -1).map(({ metadata }) => {
+  const pauses = prepared.slice(0, -1).map(({ metadata, inactiveEdges }) => {
     const pauseMs = Number.isFinite(metadata?.pauseMs) ? metadata.pauseMs : PROSODIC_PAUSES.soft;
-    return Math.max(0, Math.round(sampleRate * pauseMs / 1000));
+    const desiredSamples = Math.max(0, Math.round(sampleRate * pauseMs / 1000));
+    // Pocket already renders an EOS tail. Insert only the missing portion of
+    // the requested pause instead of stacking silence twice between chunks.
+    return Math.max(0, desiredSamples - Math.min(desiredSamples, inactiveEdges.trailing));
   });
   const terminalTailSamples = Math.max(1, Math.round(sampleRate * TERMINAL_TAIL_MILLISECONDS / 1000));
   const initialHeadSamples = Math.max(1, Math.round(sampleRate * INITIAL_HEAD_MILLISECONDS / 1000));
