@@ -1,10 +1,10 @@
-import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.6.0";
-import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.6.0";
-import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.6.0";
-import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.6.0";
-import { installReferenceRuntime } from "./reference-runtime.js?v=6.6.0";
-import { createModelAssetLoader } from "./model-download.js?v=6.6.0";
-import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.6.0";
+import { splitVoiceTextByTokens } from "./text-pipeline.js?v=6.7.0";
+import { POCKET_STANDARD_REVISION, POCKET_STUDIO_REVISION, POCKET_STUDIO_VOICES_REVISION, STANDARD_ASSET_BYTES, STUDIO_ASSET_BYTES, resolveStudioStartup, resolveVoiceQuality, studioVoiceUrl } from "./quality-config.js?v=6.7.0";
+import { assertStudioVoiceState, parseVoiceSafetensors } from "./voice-state.js?v=6.7.0";
+import { installStudioVoiceRuntime, STUDIO_VOICE_LOADER_KEY } from "./quality-runtime.js?v=6.7.0";
+import { installReferenceRuntime } from "./reference-runtime.js?v=6.7.0";
+import { createModelAssetLoader } from "./model-download.js?v=6.7.0";
+import { installModelSessionRuntime, loadModelSessions, MODEL_SESSION_LOADER_KEY } from "./model-session.js?v=6.7.0";
 
 const RUNTIME_BASE = new URL("./vendor/", import.meta.url);
 const STARTUP = resolveStudioStartup(self.location.search);
@@ -177,6 +177,7 @@ function replaceExactlyOnce(source, search, replacement, integrationName) {
 function installDurationGuard(workerSource, {
   samplerDecodeSteps = 5,
   temperature = 0.5,
+  randomSeedSalt = 1,
 } = {}) {
   if (!Number.isInteger(samplerDecodeSteps) || samplerDecodeSteps < 1 || samplerDecodeSteps > 8) {
     throw new RangeError("A quantidade de etapas do Estúdio está fora do intervalo revisado.");
@@ -184,31 +185,42 @@ function installDurationGuard(workerSource, {
   if (!Number.isFinite(temperature) || temperature < 0.1 || temperature > 1) {
     throw new RangeError("A temperatura do Estúdio está fora do intervalo revisado.");
   }
-  // Pocket emits 1,920 samples per autoregressive frame at 24 kHz (80 ms).
-  // A fixed 500-frame ceiling therefore permits 40 seconds *per internal
-  // sentence*, even for a handful of characters. Keep generous headroom for
-  // slow Portuguese prosody, but fail closed when EOS never arrives.
+  if (!Number.isSafeInteger(randomSeedSalt) || randomSeedSalt < 0 || randomSeedSalt > 0xffffffff) {
+    throw new RangeError("A semente de estabilidade está fora do intervalo revisado.");
+  }
+  // Mirror Pocket 3.0.2's native generation budget: three text tokens per
+  // second plus two seconds of headroom at 12.5 acoustic frames per second.
+  // A small word-rate plausibility floor rejects the Portuguese model's
+  // occasional *premature* EOS spike. The official token budget remains the
+  // hard ceiling, so this cannot restore the old unbounded repetition path.
   let source = replaceExactlyOnce(
     workerSource,
     "        const chunkText = chunks[chunkIdx];",
     `        const audioriaPreparedChunk = prepareTextPrompt(chunks[chunkIdx]);
         const chunkText = audioriaPreparedChunk.text;
-        const audioriaFramesAfterEos = Math.max(framesAfterEos, audioriaPreparedChunk.framesAfterEos);
-        const audioriaCodePoints = Array.from(chunkText.trim()).length;
+        const audioriaFramesAfterEos = audioriaPreparedChunk.framesAfterEos;`,
+    "da preparação oficial por trecho",
+  );
+  source = replaceExactlyOnce(
+    source,
+    "        const tokenIds = tokenizerProcessor.encodeIds(chunkText);",
+    `        const tokenIds = tokenizerProcessor.encodeIds(chunkText);
         const audioriaWordCount = chunkText.trim().split(/\\s+/u).filter(Boolean).length;
         const audioriaMaxFrames = Math.min(
             MAX_FRAMES,
-            Math.max(60, Math.ceil(38 + audioriaCodePoints * 2.2))
+            Math.max(32, Math.ceil((tokenIds.length / 3 + 2) * 12.5))
         );
-        const audioriaMinimumFrames = Math.min(
-            audioriaMaxFrames - 8,
-            Math.max(
-                6,
-                Math.ceil(audioriaWordCount * 3.5),
-                Math.ceil(audioriaCodePoints * 0.45)
-            )
+        const audioriaMinimumEosFrame = Math.min(
+            audioriaMaxFrames - audioriaFramesAfterEos - 1,
+            Math.max(6, Math.ceil(audioriaWordCount * 3.25))
         );`,
-    "do limite proporcional ao texto",
+    "do teto nativo guiado pelos tokens",
+  );
+  source = replaceExactlyOnce(
+    source,
+    "            const isEos = eosLogit > -4.0;",
+    "            const isEos = eosLogit > -4.0 && step >= audioriaMinimumEosFrame;",
+    "da rejeição de EOS precoce em português",
   );
   source = replaceExactlyOnce(
     source,
@@ -256,14 +268,33 @@ function installDurationGuard(workerSource, {
   source = replaceExactlyOnce(
     source,
     source.slice(chunkerStart, chunkerEnd),
-    `function splitIntoBestSentences(text) {
+    `function audioriaStableSeed(value) {
+    let hash = (2166136261 ^ ${randomSeedSalt >>> 0}) >>> 0;
+    const text = String(value ?? "");
+    for (let index = 0; index < text.length; index++) {
+        hash = Math.imul(hash ^ text.charCodeAt(index), 16777619) >>> 0;
+    }
+    return hash || 1;
+}
+
+function closeAudioriaSynthesisPhrase(value) {
+    const text = String(value ?? "").trim();
+    const parts = text.match(/^(.*?)(["')\\]]*)$/u);
+    const body = (parts?.[1] ?? text).trimEnd();
+    const closers = parts?.[2] ?? "";
+    if (/[.!?…]$/u.test(body)) return body + closers;
+    if (/[,;:-]$/u.test(body)) return body.slice(0, -1) + "." + closers;
+    return body + "." + closers;
+}
+
+function splitIntoBestSentences(text) {
     const prepared = prepareTextPrompt(text.normalize("NFC"));
     const chunks = globalThis[${JSON.stringify(TEXT_CHUNKER_KEY)}](prepared.text, {
         encode: (candidate) => tokenizerProcessor.encodeIds(candidate),
         maxTokens: currentMaxTokenPerChunk,
         language: currentLanguage,
         prepareText: (candidate) => prepareTextPrompt(candidate).text,
-    });
+    }).map(closeAudioriaSynthesisPhrase);
     return { chunks, framesAfterEos: prepared.framesAfterEos };
 }
 `,
@@ -271,33 +302,35 @@ function installDurationGuard(workerSource, {
   );
   source = replaceExactlyOnce(
     source,
-    "            const isEos = eosLogit > -4.0;",
-    "            const isEos = eosLogit > -4.0 && step >= audioriaMinimumFrames;",
-    "do piso anti-EOS precoce",
-  );
-  // A single noisy EOS logit used to start an irrevocable countdown. Require
-  // two adjacent 80 ms frames before accepting EOS, so a transient spike in a
-  // stressed Portuguese vowel cannot truncate the following syllable.
-  source = replaceExactlyOnce(
-    source,
-    "        let eosStep = null;",
-    `        let eosStep = null;
-        let audioriaConsecutiveEosFrames = 0;`,
-    "do estado de confirmação de EOS",
+    "            const shouldStop = eosStep != null && step >= eosStep + framesAfterEos;",
+    "            const shouldStop = eosStep != null && step >= eosStep + audioriaFramesAfterEos;",
+    "da cauda oficial específica de cada trecho",
   );
   source = replaceExactlyOnce(
     source,
-    `            if (isEos && eosStep == null) {
-                eosStep = step;
-            }
-            const shouldStop = eosStep != null && step >= eosStep + framesAfterEos;`,
-    `            if (eosStep == null) {
-                audioriaConsecutiveEosFrames = isEos ? audioriaConsecutiveEosFrames + 1 : 0;
-                if (audioriaConsecutiveEosFrames >= 2) eosStep = step - 1;
-            }
-            const shouldStop = eosStep != null && step >= eosStep + audioriaFramesAfterEos;`,
-    "da confirmação estável de EOS e drenagem do decoder",
+    "    const firstChunkFrames = 3;",
+    "    const firstChunkFrames = 12;",
+    "do pré-buffer de qualidade do primeiro fonema",
   );
+  source = replaceExactlyOnce(
+    source,
+    "        const chunkLatents = [];",
+    `        let audioriaRandomState = audioriaStableSeed(voiceName + "\\0" + chunkIdx + "\\0" + chunkText);
+        const audioriaRandom = () => {
+            let value = audioriaRandomState += 0x6D2B79F5;
+            value = Math.imul(value ^ value >>> 15, value | 1);
+            value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+            return ((value ^ value >>> 14) >>> 0) / 4294967296;
+        };
+
+        const chunkLatents = [];`,
+    "da amostragem determinística por texto",
+  );
+  const randomCalls = source.match(/Math\.random\(\)/gu) ?? [];
+  if (randomCalls.length !== 2) {
+    throw new Error("A amostragem do runtime fixado mudou sem revisão.");
+  }
+  source = source.replaceAll("Math.random()", "audioriaRandom()");
   // Match the current native Pocket pipeline: prepare EACH internal sentence.
   // Splitting trims short-input padding, and the final sentence can be much
   // shorter than the outer request. Its decoder tail must follow its own text.
@@ -319,16 +352,14 @@ function installDurationGuard(workerSource, {
         if (chunkEnded && isGenerating && chunkIdx < chunks.length - 1) {`,
     "da falha segura após o limite",
   );
-  // The reviewed upstream runtime lets bundle metadata overwrite its special
-  // short-prompt tail. The former long-prompt value was only two 80 ms frames;
-  // recorded evidence still had -30 to -40 dBFS at that boundary. Drain eight
-  // frames for very short prompts and six for all others. The stitcher later
-  // removes only a proven near-digital-silence excess, never active phonemes.
+  // Pocket 3.0.2 emits 5/3 frames including its post-EOS drain. This web loop
+  // decodes the stop frame before breaking, so 4/2 yields the same effective
+  // 5/3 frames instead of one extra opportunity to repeat a word.
   source = replaceExactlyOnce(
     source,
     "    let framesAfterEos = wordCount <= 4 ? 3 : 1;",
-    "    let framesAfterEos = wordCount <= 4 ? 8 : 6;",
-    "da cauda acústica para texto curto",
+    "    let framesAfterEos = wordCount <= 4 ? 4 : 2;",
+    "da cauda acústica oficial do Pocket 3.0.2",
   );
   source = replaceExactlyOnce(
     source,
@@ -409,7 +440,10 @@ async function boot() {
     samplerDecodeSteps: QUALITY.samplerDecodeSteps,
     temperature: QUALITY.temperature,
   });
-  source = installReferenceRuntime(source);
+  // Studio keeps Pocket's native full-context codec pass for the closest
+  // possible timbre match. The mobile profile windows only the codec input to
+  // bound peak memory; both retain every selected reference frame.
+  source = installReferenceRuntime(source, { windowed: QUALITY.id !== "studio" });
   if (QUALITY.id === "studio") source = installStudioVoiceRuntime(source);
   source = installModelSessionRuntime(source);
   source = source
@@ -458,7 +492,7 @@ async function boot() {
   for (const data of pendingMessages.splice(0)) {
     await runtimeHandler.call(self, { data });
   }
-  self.postMessage({ type: "audioria_runtime", version: "6.6.0" });
+  self.postMessage({ type: "audioria_runtime", version: "6.7.0" });
 }
 
 try {

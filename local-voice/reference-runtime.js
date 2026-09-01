@@ -42,12 +42,19 @@ export async function encodeReferenceWindows(audioData, encodeWindow, onProgress
 
 // Preserve native full-context LM prefill: splitting dynamic-INT8 prefill also
 // changes its quantization scales, separately from the codec windowing above.
-export function installReferenceRuntime(source) {
+export function installReferenceRuntime(source, { windowed = true } = {}) {
+  if (typeof windowed !== "boolean") throw new TypeError("windowed precisa ser booleano.");
   const encoderAnchor = "async function encodeVoiceAudio(audioData) {";
   const before = `            customVoiceEmbedding = await encodeVoiceAudio(data.audio);
             currentVoiceName = "custom";
             await ensureCustomVoiceCached({ force: true, statusText: "Preparing custom voice..." });
             postMessage({ type: "voice_encoded", voiceName: "custom" });`;
+  const encodeReference = windowed
+    ? `customVoiceEmbedding = await encodeReferenceWindows(data.audio, encodeVoiceAudio, ({ current, total }) => {
+                postMessage({ type: "audioria_reference_progress", requestId: audioriaRequestId, phase: "reference-encoding", current, total });
+            });`
+    : `customVoiceEmbedding = await encodeVoiceAudio(data.audio);
+            postMessage({ type: "audioria_reference_progress", requestId: audioriaRequestId, phase: "reference-encoding", current: data.audio.length, total: data.audio.length });`;
   const after = `            const audioriaRequestId = e.data.requestId ?? null;
             if (!(data.audio instanceof Float32Array) || !data.audio.length || data.audio.length > 30 * 24000) {
                 throw new Error("A referência deve conter até 30 segundos de áudio mono a 24 kHz.");
@@ -57,9 +64,7 @@ export function installReferenceRuntime(source) {
             voiceConditioningCache.clear();
             customVoiceEmbedding = null;
             postMessage({ type: "audioria_reference_progress", requestId: audioriaRequestId, phase: "reference-encoding", samples: data.audio.length });
-            customVoiceEmbedding = await encodeReferenceWindows(data.audio, encodeVoiceAudio, ({ current, total }) => {
-                postMessage({ type: "audioria_reference_progress", requestId: audioriaRequestId, phase: "reference-encoding", current, total });
-            });
+            ${encodeReference}
             postMessage({ type: "audioria_reference_progress", requestId: audioriaRequestId, phase: "reference-conditioning", frames: customVoiceEmbedding.shape[1] });
             currentVoiceName = "custom";
             await ensureCustomVoiceCached({ force: true, statusText: "Preparing custom voice..." });
@@ -69,5 +74,8 @@ export function installReferenceRuntime(source) {
       source.includes("async function encodeReferenceWindows(")) {
     throw new Error("A preparação da referência não corresponde ao motor revisado.");
   }
-  return source.replace(before, after).replace(encoderAnchor, `${encodeReferenceWindows.toString()}\n\n${encoderAnchor}`);
+  const patched = source.replace(before, after);
+  return windowed
+    ? patched.replace(encoderAnchor, `${encodeReferenceWindows.toString()}\n\n${encoderAnchor}`)
+    : patched;
 }

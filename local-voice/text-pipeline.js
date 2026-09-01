@@ -245,7 +245,9 @@ export function normalizeVoiceText(input, language = "portuguese") {
     .replace(/US\$\s*(\d+(?:[.,]\d+)*)/giu, "$1 US dollars");
 
   value = replaceSymbols(value, profile)
-    .replace(/[`^~|\\{}()]/gu, " ")
+    // Parentheses are meaningful prosody. Keep them in the editable text and
+    // let the synthesis-only planner turn them into pauses later.
+    .replace(/[`^~|\\{}]/gu, " ")
     .replaceAll("[", " ")
     .replaceAll("]", " ")
     .replace(HORIZONTAL_SPACE, " ")
@@ -270,10 +272,19 @@ export function normalizeVoiceText(input, language = "portuguese") {
 export function stabilizeVoiceProsody(input) {
   if (typeof input !== "string") throw new TypeError("O texto de prosódia deve ser uma string.");
   const value = input.normalize("NFC")
+    // Pocket is more reliable with one unambiguous terminal token. Preserve
+    // question intent in mixed runs and never rewrite a letter or accent.
     .replace(/\.{2,}/gu, ".")
-    .replace(/([!?])(?:\s*[!?])+/gu, "$1")
+    .replace(/(?:\?\s*!+|!+\s*\?+|\?{2,})/gu, "?")
+    .replace(/!{2,}/gu, "!")
     .replace(/([,;:])(?:\s*[,;:])+/gu, "$1")
+    .replace(/^\s*\(\s*/u, "")
+    .replace(/\(\s*/gu, ", ")
+    .replace(/\s*\)/gu, ",")
     .replace(/([,;:.!?])(?=[\p{L}\p{N}])/gu, "$1 ")
+    .replace(/\s+([,;:.!?])/gu, "$1")
+    .replace(/,\s*([.!?])/gu, "$1")
+    .replace(/([.!?])\s*,/gu, "$1")
     .replace(HORIZONTAL_SPACE, " ")
     .trim();
   if (!/[\p{L}\p{N}]/u.test(value)) throw new RangeError("Digite palavras para gerar voz, não apenas pontuação.");
@@ -341,25 +352,21 @@ export function splitVoiceTextByTokens(input, {
     const ids = encode(prepareText(candidate));
     return ids.length > 0 && ids.length <= maxTokens;
   };
-  if (fits(text)) return [text];
   const locale = resolveVoiceLanguage(language).locale;
   const naturalSentences = segmentSentences(text, locale).map((segment) => segment.text);
   // Intl may split `Olá!Tudo bem?` without an existing separator. Keep the
   // original spelling rather than silently manufacture whitespace there.
   const sentences = naturalSentences.join(" ") === text ? naturalSentences : [text];
+  if (sentences.length === 1 && fits(text)) return [text];
   const chunks = [];
-  let current = "";
   for (const sentence of sentences) {
     if (fits(sentence)) {
-      const combined = current ? `${current} ${sentence}` : sentence;
-      if (fits(combined)) current = combined;
-      else {
-        if (current) chunks.push(current);
-        current = sentence;
-      }
+      // Reset the model's text/KV state at every semantic sentence. Joining
+      // several sentences merely because they fit the token budget made the
+      // community web port more prone to repetitions after punctuation.
+      chunks.push(sentence);
       continue;
     }
-    if (current) { chunks.push(current); current = ""; }
     const words = sentence.split(/\s+/u);
     let start = 0;
     while (start < words.length) {
@@ -376,12 +383,10 @@ export function splitVoiceTextByTokens(input, {
       }
       if (end < words.length && lastPause >= start + Math.ceil((end - start) * 0.5)) end = lastPause;
       const chunk = words.slice(start, end).join(" ");
-      if (end === words.length) current = chunk;
-      else chunks.push(chunk);
+      chunks.push(chunk);
       start = end;
     }
   }
-  if (current) chunks.push(current);
   // Defense-in-depth: nothing may be dropped, duplicated or re-encoded.
   if (chunks.join(" ") !== text || chunks.some((chunk) => !fits(chunk) || !/[\p{L}\p{N}]/u.test(chunk))) {
     throw new Error("O texto não pôde ser dividido sem alterar seu conteúdo.");
@@ -460,41 +465,11 @@ export function splitVoiceText(input, {
       paragraphBreakAfter: paragraphBreakAfter && index === pieces.length - 1,
     }));
   });
-  const chunks = [];
-  const paragraphBreaks = [];
-  let current = "";
-  let currentParagraphBreak = false;
-
-  for (const unit of units) {
-    const candidate = current ? `${current} ${unit.text}` : unit.text;
-    if (codePointLength(candidate) <= maxCharacters) {
-      current = candidate;
-      currentParagraphBreak = unit.paragraphBreakAfter;
-      if (currentParagraphBreak) {
-        chunks.push(current);
-        paragraphBreaks.push(true);
-        current = "";
-        currentParagraphBreak = false;
-      }
-      continue;
-    }
-    if (current) {
-      chunks.push(current);
-      paragraphBreaks.push(currentParagraphBreak);
-    }
-    current = unit.text;
-    currentParagraphBreak = unit.paragraphBreakAfter;
-    if (currentParagraphBreak) {
-      chunks.push(current);
-      paragraphBreaks.push(true);
-      current = "";
-      currentParagraphBreak = false;
-    }
-  }
-  if (current) {
-    chunks.push(current);
-    paragraphBreaks.push(currentParagraphBreak);
-  }
+  // One semantic sentence per request keeps punctuation deterministic and
+  // guarantees that generative/KV history is recreated for the next phrase.
+  // Oversized sentences are already split above at punctuation/whitespace.
+  const chunks = units.map(({ text }) => text);
+  const paragraphBreaks = units.map(({ paragraphBreakAfter }) => paragraphBreakAfter);
 
   if (!chunks.length || chunks.some((chunk) => !chunk || codePointLength(chunk) > maxCharacters)) {
     throw new Error("Não foi possível dividir o texto com segurança.");
@@ -651,7 +626,10 @@ export function masterVoicePcm(audio, sampleRate, {
   let peak = 0;
   for (const sample of output) peak = Math.max(peak, Math.abs(sample));
   const maximumGain = 10 ** (maximumGainDb / 20);
-  const gain = peak > 0 ? Math.min(maximumGain, 0.88 / peak) : 1;
+  // maximumGainDb=0 is also the deterministic "filter only" path used before
+  // stitching. Do not normalize each sentence independently: doing so flattens
+  // natural emphasis and makes joins sound pumped/artificial.
+  const gain = maximumGainDb === 0 ? 1 : peak > 0 ? Math.min(maximumGain, 0.88 / peak) : 1;
   const knee = peakCeiling * 0.9;
   const kneeRange = Math.max(Number.EPSILON, peakCeiling - knee);
   for (let index = 0; index < output.length; index += 1) {
@@ -773,7 +751,7 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
     if (!hasUsableGeneratedSignal(audio, sampleRate)) return [];
     const drained = capExcessDecoderSilence(audio, sampleRate);
     return drained.length ? [{
-      audio: masterVoicePcm(drained, sampleRate),
+      audio: masterVoicePcm(drained, sampleRate, { maximumGainDb: 0 }),
       // Only literal digital zero is safe for edge fades/pause accounting.
       // Near-zero is still data and may be the attack/release of a phoneme.
       inactiveEdges: measureInactiveEdges(drained, 0),
@@ -811,7 +789,11 @@ export function stitchVoiceAudio(renderedChunks, sampleRate, {
     offset += faded.length;
     if (index < pauses.length) offset += pauses[index];
   });
-  return output;
+  // One shared gain decision preserves the relative dynamics between every
+  // sentence while still delivering a clear, peak-safe final file. The
+  // chunks were already high-passed above, so this pass leaves digital guard
+  // silence exactly zero.
+  return masterVoicePcm(output, sampleRate, { highPassHz: 0 });
 }
 
 export const LOCAL_VOICE_TEXT_LIMITS = Object.freeze({
